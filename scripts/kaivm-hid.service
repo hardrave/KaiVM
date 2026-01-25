@@ -1,0 +1,13 @@
+[Unit]
+Description=kaiVM USB HID gadget (keyboard + mouse)
+After=systemd-modules-load.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/env python3 /usr/local/sbin/kaivm-hid-gadget.py start
+ExecStop=/usr/bin/env python3 /usr/local/sbin/kaivm-hid-gadget.py stop
+
+[Install]
+WantedBy=multi-user.target
+

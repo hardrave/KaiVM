@@ -1,0 +1,17 @@
+[Unit]
+Description=kaiVM capture (UVC -> /run/kaivm/latest.jpg)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/kaivm capture --device /dev/video0 --size 1280x720 --in-fps 30 --out-fps 1.5 --warmup 12
+Restart=always
+RestartSec=1
+
+# If you want to run unprivileged, ensure user is in video group and /run/kaivm is writable.
+User=kai
+Group=video
+
+[Install]
+WantedBy=multi-user.target
+

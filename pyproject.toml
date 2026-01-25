@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kaivm"
+version = "0.1.0"
+description = "kaiVM: Pi-based KVM HID + UVC capture + Gemini 3 agent PoC"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "google-genai>=0.7.0",
+]
+
+[project.scripts]
+kaivm = "kaivm.cli:main"
+
