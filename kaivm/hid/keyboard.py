@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
 
 from kaivm.hid.udc import wait_udc_configured
 from kaivm.util.log import get_logger
@@ -101,8 +101,14 @@ MOD_NAMES = {
     "META": MOD_LGUI,
 }
 
-def _pack_report(mod: int, key: int) -> bytes:
-    return bytes([mod & 0xFF, 0x00, key & 0xFF, 0, 0, 0, 0, 0])
+def _pack_report(mod: int, keys: List[int]) -> bytes:
+    # 8 bytes: [mod, reserved, k1, k2, k3, k4, k5, k6]
+    rep = bytearray(8)
+    rep[0] = mod & 0xFF
+    # rep[1] is reserved (0)
+    for i, k in enumerate(keys[:6]):
+        rep[2 + i] = k & 0xFF
+    return bytes(rep)
 
 
 @dataclass
@@ -131,18 +137,20 @@ class KeyboardHID:
                 os.close(fd)
         return False
 
-    def send_key(self, mod: int, keycode: int, hold_ms: int = 30) -> None:
+    def send_report(self, mod: int, keys: List[int]) -> None:
         if not wait_udc_configured(timeout=20.0):
+            # In manual mode, we might just want to log and return instead of crashing
+            # But let's keep the check for safety.
             raise RuntimeError("UDC not configured (host not enumerated?)")
+        
+        payload = _pack_report(mod, keys)
+        if not self._write_with_retry(payload, timeout=self.io_timeout):
+            raise TimeoutError(f"keyboard write timeout dev={self.dev}")
 
-        down = _pack_report(mod, keycode)
-        up = _pack_report(0, 0)
-
-        if not self._write_with_retry(down, timeout=self.io_timeout):
-            raise TimeoutError(f"keyboard write timeout (down) dev={self.dev}")
+    def send_key(self, mod: int, keycode: int, hold_ms: int = 30) -> None:
+        self.send_report(mod, [keycode])
         time.sleep(hold_ms / 1000.0)
-        if not self._write_with_retry(up, timeout=self.io_timeout):
-            raise TimeoutError(f"keyboard write timeout (up) dev={self.dev}")
+        self.send_report(0, [])
 
     def send_keycode(self, mod: int, key: int, hold_ms: int = 30) -> None:
         self.send_key(mod, key, hold_ms=hold_ms)

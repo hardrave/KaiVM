@@ -50,24 +50,22 @@ class MouseHID:
                 os.close(fd)
         return False
 
-    def move(self, dx: int, dy: int) -> None:
+    def send_report(self, buttons: int, dx: int, dy: int) -> None:
         if not wait_udc_configured(timeout=20.0):
             raise RuntimeError("UDC not configured (host not enumerated?)")
+        
+        if not self._write_with_retry(_pack(buttons, dx, dy), timeout=self.io_timeout):
+            raise TimeoutError("mouse write timed out")
 
-        if not self._write_with_retry(_pack(0, dx, dy), timeout=self.io_timeout):
-            raise TimeoutError("mouse move timed out")
+    def move(self, dx: int, dy: int) -> None:
+        self.send_report(0, dx, dy)
 
     def click(self, button: str = "left", hold_ms: int = 60) -> None:
         if button not in BUTTONS:
             raise ValueError(f"Unknown button: {button}")
 
-        if not wait_udc_configured(timeout=20.0):
-            raise RuntimeError("UDC not configured (host not enumerated?)")
-
         mask = BUTTONS[button]
-        if not self._write_with_retry(_pack(mask, 0, 0), timeout=self.io_timeout):
-            raise TimeoutError("mouse click down timed out")
+        self.send_report(mask, 0, 0)
         time.sleep(hold_ms / 1000.0)
-        if not self._write_with_retry(_pack(0, 0, 0), timeout=self.io_timeout):
-            raise TimeoutError("mouse click up timed out")
+        self.send_report(0, 0, 0)
 

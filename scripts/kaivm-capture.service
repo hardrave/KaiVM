@@ -4,14 +4,15 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/kaivm capture --device /dev/video0 --size 1280x720 --in-fps 30 --out-fps 1.5 --warmup 12
-Restart=always
-RestartSec=1
-
-# If you want to run unprivileged, ensure user is in video group and /run/kaivm is writable.
 User=kai
 Group=video
+# Ensure /run/kaivm exists and is writable (or rely on kaivm creating it if it has permissions)
+# Ideally RuntimeDirectory=kaivm would handle /run/kaivm creation with correct perms
+RuntimeDirectory=kaivm
+ExecStart=/home/kai/kaivm/.venv/bin/kaivm capture --device /dev/video0 --size 1280x720 --in-fps 30 --out-fps 10 --warmup 2
+Restart=always
+RestartSec=1
+Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target
-

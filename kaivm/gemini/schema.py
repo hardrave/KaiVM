@@ -15,6 +15,10 @@ PLAN_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
+        "reasoning": {
+            "type": "string",
+            "description": "Brief explanation of the current state and why these actions were chosen."
+        },
         "actions": {
             "type": "array",
             "minItems": 1,
@@ -36,6 +40,6 @@ PLAN_SCHEMA = {
             },
         }
     },
-    "required": ["actions"],
+    "required": ["reasoning", "actions"],
 }
 

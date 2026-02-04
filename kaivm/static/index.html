@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>kaiVM Remote</title>
+    <style>
+        :root {
+            --bg-dark: #0f0f0f;
+            --bg-card: #1a1a1a;
+            --bg-input: #252525;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --text: #e5e7eb;
+            --text-muted: #9ca3af;
+            --danger: #ef4444;
+            --success: #10b981;
+            --border: #333;
+        }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg-dark); 
+            color: var(--text); 
+            margin: 0; 
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            padding: 12px 24px;
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        header h1 { margin: 0; font-size: 1.2rem; font-weight: 600; color: var(--accent); }
+        
+        .main-container { 
+            display: flex; 
+            flex: 1;
+            overflow: hidden;
+            padding: 16px;
+            gap: 16px;
+        }
+        
+        .video-column { 
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0; /* Important for flex shrink */
+        }
+        
+        .video-box { 
+            background: #000; 
+            border: 1px solid var(--border); 
+            border-radius: 8px;
+            flex: 1;
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            position: relative;
+        }
+        img#stream { 
+            max-width: 100%; 
+            max-height: 100%; 
+            object-fit: contain;
+            cursor: crosshair;
+        }
+        
+        .sidebar { 
+            width: 380px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            overflow-y: auto;
+        }
+        
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+        }
+        .card h3, .card h4 { margin: 0 0 12px 0; font-size: 0.95rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+        
+        .mode-switch {
+            display: flex;
+            background: var(--bg-input);
+            padding: 4px;
+            border-radius: 6px;
+            margin-bottom: 16px;
+        }
+        .mode-switch label {
+            flex: 1;
+            text-align: center;
+            padding: 8px;
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+        .mode-switch input { display: none; }
+        .mode-switch label:has(input:checked) {
+            background: var(--accent);
+            color: white;
+            font-weight: 500;
+        }
+
+        textarea { 
+            width: 100%; 
+            height: 80px; 
+            background: var(--bg-input); 
+            color: var(--text); 
+            border: 1px solid var(--border); 
+            border-radius: 6px;
+            padding: 10px; 
+            box-sizing: border-box; 
+            font-family: inherit;
+            resize: none;
+            margin-bottom: 12px;
+        }
+        textarea:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+        
+        .form-row { margin-bottom: 12px; }
+        select, input[type="password"] {
+            width: 100%;
+            background: var(--bg-input);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 10px;
+            box-sizing: border-box;
+            font-size: 0.9rem;
+        }
+
+        .options-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .options-grid label {
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--text-muted);
+        }
+
+        .actions-group { display: flex; gap: 10px; }
+        button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9rem;
+            transition: opacity 0.2s;
+        }
+        button:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-run { background: var(--success); color: white; }
+        .btn-stop { background: var(--danger); color: white; }
+        
+        #statusIndicator {
+            margin-top: 12px;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            padding: 8px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 4px;
+            border-left: 3px solid var(--accent);
+        }
+
+        .plan-box { flex: 1; min-height: 150px; }
+        #planList { font-size: 0.85rem; overflow-y: auto; flex: 1; }
+        .action-item {
+            padding: 8px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-muted);
+        }
+        .action-item:last-child { border-bottom: none; }
+        
+        .status-box {
+            height: 200px;
+            font-family: "JetBrains Mono", "Fira Code", monospace;
+            font-size: 0.8rem;
+            background: #000;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            color: #ccc;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>kaiVM</h1>
+    <div id="connectionStatus" style="font-size: 0.8rem; color: var(--success);">● System Online</div>
+</header>
+
+<div class="main-container">
+    <div class="video-column">
+        <div class="video-box">
+            <img id="stream" src="/stream" alt="Remote Stream">
+        </div>
+    </div>
+    
+    <div class="sidebar">
+        <div class="card" id="agentControls">
+            <h3>Control Center</h3>
+            
+            <div class="mode-switch">
+                <label><input type="radio" name="mode" value="agent" checked onchange="setMode('agent')"> Agent</label>
+                <label><input type="radio" name="mode" value="manual" onchange="setMode('manual')"> Manual</label>
+            </div>
+
+            <textarea id="instruction" placeholder="Enter instruction for the agent..."></textarea>
+            
+            <div class="form-row">
+                <select id="modelSelect">
+                    <option value="gemini-3-flash-preview" selected>Gemini 3 Flash (Fast)</option>
+                    <option value="gemini-3-pro-preview">Gemini 3 Pro (Smarter)</option>
+                    <option value="gemini-2.0-flash-thinking-exp-01-21">Gemini 2.0 Flash Thinking</option>
+                </select>
+            </div>
+
+            <div class="form-row">
+                <input type="password" id="apiKey" placeholder="Gemini API Key (optional)">
+            </div>
+
+            <div class="options-grid">
+                <label><input type="checkbox" id="allowDanger"> Allow Danger</label>
+                <label><input type="checkbox" id="dryRun"> Dry Run</label>
+            </div>
+
+            <div class="actions-group">
+                <button class="btn-run" onclick="runAgent()">RUN AGENT</button>
+                <button class="btn-stop" onclick="stopAgent()">STOP</button>
+            </div>
+            
+            <div id="statusIndicator">Status: Idle</div>
+        </div>
+
+        <div class="card plan-box">
+            <h4>Planned Actions</h4>
+            <div id="planList"></div>
+        </div>
+
+        <div class="status-box" id="logs"></div>
+    </div>
+</div>
+
+<script>
+    let ws = null;
+    let mode = 'agent';
+
+    function setMode(m) {
+        mode = m;
+        const stream = document.getElementById('stream');
+        const inputs = document.querySelectorAll('#instruction, #apiKey, #modelSelect, .btn-run, .options-grid input');
+        
+        if (mode === 'manual') {
+            inputs.forEach(el => el.disabled = true);
+            document.getElementById('statusIndicator').innerText = "Status: Manual Mode (Click video to capture)";
+            document.getElementById('statusIndicator').style.borderLeftColor = 'var(--success)';
+            
+            connectWS();
+            
+            stream.onclick = () => {
+                stream.requestPointerLock();
+            };
+        } else {
+            inputs.forEach(el => el.disabled = false);
+            document.getElementById('statusIndicator').innerText = "Status: Idle";
+            document.getElementById('statusIndicator').style.borderLeftColor = 'var(--accent)';
+            
+            if (document.exitPointerLock) document.exitPointerLock();
+            stream.onclick = function() {
+                this.src = '/stream?' + new Date().getTime();
+            };
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+    }
+
+    function connectWS() {
+        if (ws) return;
+        ws = new WebSocket(((window.location.protocol === "https:") ? "wss://" : "ws://") + window.location.host + "/ws/input");
+        ws.onopen = () => console.log("Input WS connected");
+        ws.onclose = () => { ws = null; console.log("Input WS closed"); };
+    }
+
+    // Input Capture
+    document.addEventListener('pointerlockchange', () => {
+        const stream = document.getElementById('stream');
+        if (document.pointerLockElement === stream) {
+            console.log("Pointer locked");
+        } else {
+            console.log("Pointer unlocked");
+        }
+    });
+
+    document.addEventListener('mousemove', e => {
+        if (!ws || document.pointerLockElement !== document.getElementById('stream')) return;
+        ws.send(JSON.stringify({
+            type: 'mousemove',
+            dx: e.movementX,
+            dy: e.movementY,
+            buttons: e.buttons
+        }));
+    });
+
+    document.addEventListener('mousedown', e => {
+        if (!ws || document.pointerLockElement !== document.getElementById('stream')) return;
+        ws.send(JSON.stringify({
+            type: 'mousedown',
+            button: e.button,
+            buttons: e.buttons
+        }));
+    });
+
+    document.addEventListener('mouseup', e => {
+        if (!ws || document.pointerLockElement !== document.getElementById('stream')) return;
+        ws.send(JSON.stringify({
+            type: 'mouseup',
+            button: e.button,
+            buttons: e.buttons
+        }));
+    });
+
+    document.addEventListener('keydown', e => {
+        if (!ws || document.pointerLockElement !== document.getElementById('stream')) return;
+        e.preventDefault();
+        ws.send(JSON.stringify({
+            type: 'keydown',
+            key: e.key,
+            code: e.code,
+            ctrlKey: e.ctrlKey,
+            shiftKey: e.shiftKey,
+            altKey: e.altKey,
+            metaKey: e.metaKey
+        }));
+    });
+
+    document.addEventListener('keyup', e => {
+        if (!ws || document.pointerLockElement !== document.getElementById('stream')) return;
+        e.preventDefault();
+        ws.send(JSON.stringify({
+            type: 'keyup',
+            key: e.key,
+            code: e.code,
+            ctrlKey: e.ctrlKey,
+            shiftKey: e.shiftKey,
+            altKey: e.altKey,
+            metaKey: e.metaKey
+        }));
+    });
+
+    async function runAgent() {
+        const instruction = document.getElementById('instruction').value;
+        if (!instruction) return alert("Enter an instruction");
+        
+        await fetch('/api/run', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                instruction,
+                model: document.getElementById('modelSelect').value,
+                api_key: document.getElementById('apiKey').value,
+                allow_danger: document.getElementById('allowDanger').checked,
+                dry_run: document.getElementById('dryRun').checked
+            })
+        });
+        pollState();
+    }
+
+    async function stopAgent() {
+        await fetch('/api/stop', { method: 'POST' });
+    }
+
+    function renderActions(actions) {
+        const div = document.getElementById('planList');
+        div.innerHTML = '';
+        actions.forEach(a => {
+            const d = document.createElement('div');
+            d.className = 'action-item';
+            let txt = `[${a.type}] `;
+            if (a.key) txt += a.key;
+            if (a.text) txt += `"${a.text}"`;
+            if (a.dx || a.dy) txt += `(${a.dx}, ${a.dy})`;
+            if (a.button) txt += a.button;
+            if (a.ms) txt += `${a.ms}ms`;
+            if (a.summary) txt += a.summary;
+            d.innerText = txt;
+            div.appendChild(d);
+        });
+    }
+
+    async function pollState() {
+        try {
+            const res = await fetch('/api/state');
+            const data = await res.json();
+            
+            document.getElementById('statusIndicator').innerText = "Status: " + data.status;
+            
+            const logs = document.getElementById('logs');
+            logs.innerText = data.logs.join('\n');
+            logs.scrollTop = logs.scrollHeight;
+            
+            renderActions(data.planned_actions);
+            
+            if (data.running) {
+                setTimeout(pollState, 1000);
+            }
+        } catch (e) {
+            console.error(e);
+            setTimeout(pollState, 2000);
+        }
+    }
+
+    // Start polling
+    pollState();
+    
+    // Refresh video on click if stuck
+    document.getElementById('stream').onclick = function() {
+        this.src = '/stream?' + new Date().getTime();
+    };
+</script>
+
+</body>
+</html>
