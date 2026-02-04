@@ -301,6 +301,11 @@ def run_capture_loop(
     live_period = (1.0 / live_fps) if (live_fps and live_fps > 0) else 0.0
 
     while True:
+        if not Path(reader.device).exists():
+            log.warning("Device %s not found. Waiting...", reader.device)
+            time.sleep(5.0)
+            continue
+
         try:
             reader.start()
             t0 = time.time()

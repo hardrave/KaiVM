@@ -7,9 +7,11 @@ from typing import Any, Dict, Optional
 
 from google import genai
 from google.genai import types
+from io import BytesIO
 
 from kaivm.gemini.prompts import SYSTEM, USER_TEMPLATE
 from kaivm.gemini.schema import PLAN_SCHEMA
+from kaivm.util.image import get_image_size, process_image
 from kaivm.util.log import get_logger
 
 log = get_logger("kaivm.gemini")
@@ -20,7 +22,7 @@ DEFAULT_MODEL = "gemini-3-flash-preview"
 @dataclass
 class GeminiPlanner:
     model: str = DEFAULT_MODEL
-    thinking_level: str = "low"
+    thinking_level: Optional[str] = None
     timeout_steps: int = 2
     api_key: Optional[str] = None
 
@@ -44,6 +46,13 @@ class GeminiPlanner:
         Returns parsed JSON plan dict (validated elsewhere too).
         Includes prior screenshot + last actions to reduce loops and premature done.
         """
+        # Get original image stats
+        orig_w, orig_h = get_image_size(jpeg_bytes)
+        
+        # Process: Resize + Grid
+        # We use max_dim=2048 to speed up Gemini processing and upload
+        jpeg_bytes_processed, proc_w, proc_h = process_image(jpeg_bytes, max_dim=2048)
+        
         user = USER_TEMPLATE.format(
             instruction=instruction,
             today=today or "(unknown)",
@@ -52,12 +61,20 @@ class GeminiPlanner:
             last_actions=(last_actions_text or "(none)"),
             note=(note or "(none)"),
         )
+        
+        # Inject resolution info (Model sees REAL resolution via grid labels)
+        user += f"Screen Resolution: Normalized 0-1000 scale.\n"
+        user += "A 10x10 RED GRID with coordinate labels is overlaid on the screenshot.\n"
+        user += f"The coordinates are NORMALIZED from 0 to 1000 for both X and Y axes.\n"
+        user += f"Top-Left is (0, 0). Bottom-Right is (1000, 1000).\n"
+        user += f"Use the grid labels to determine the position of elements.\n"
+
         if allow_danger:
             user += "\nNote: allow-danger is enabled, but still be careful and incremental.\n"
         else:
             user += "\nNote: allow-danger is NOT enabled. Avoid destructive actions.\n"
 
-        cur_img = types.Part.from_bytes(data=jpeg_bytes, mime_type="image/jpeg")
+        cur_img = types.Part.from_bytes(data=jpeg_bytes_processed, mime_type="image/jpeg")
         parts: list[Any] = [
             "CURRENT SCREENSHOT:",
             cur_img,
@@ -66,15 +83,23 @@ class GeminiPlanner:
 
         if prev_jpeg_bytes:
             try:
-                prev_img = types.Part.from_bytes(data=prev_jpeg_bytes, mime_type="image/jpeg")
+                # Also resize previous image for consistency if we wanted, 
+                # but for now just sending it raw or we could process it too.
+                # Processing it is safer for context matching.
+                prev_proc, _, _ = process_image(prev_jpeg_bytes, max_dim=2048)
+                prev_img = types.Part.from_bytes(data=prev_proc, mime_type="image/jpeg")
                 parts = ["PREVIOUS SCREENSHOT:", prev_img] + parts
             except Exception:
-                # If the previous image fails to attach, just omit it.
                 pass
+
+        # Configure thinking only if requested
+        thinking_cfg = None
+        if self.thinking_level:
+            thinking_cfg = types.ThinkingConfig(thinking_level=self.thinking_level)
 
         cfg = types.GenerateContentConfig(
             system_instruction=SYSTEM,
-            thinking_config=types.ThinkingConfig(thinking_level=self.thinking_level),
+            thinking_config=thinking_cfg,
             response_mime_type="application/json",
             response_json_schema=PLAN_SCHEMA,
         )
@@ -101,7 +126,8 @@ class GeminiPlanner:
             last_text = txt
 
             try:
-                return json.loads(txt)
+                plan = json.loads(txt)
+                return plan
             except Exception:
                 log.warning("Gemini returned non-JSON (attempt %d): %r", attempt + 1, txt[:250])
 

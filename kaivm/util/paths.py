@@ -6,3 +6,6 @@ LIVE_MJPG = RUN_DIR / "live.mjpg"
 
 STOP_FILE = Path("/tmp/kaivm.stop")
 
+CONFIG_DIR = Path.home() / ".config" / "kaivm"
+CALIBRATION_FILE = CONFIG_DIR / "calibration.txt"
+

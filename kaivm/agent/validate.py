@@ -18,6 +18,8 @@ class Action:
     ms: Optional[int] = None
     dx: Optional[int] = None
     dy: Optional[int] = None
+    x: Optional[int] = None
+    y: Optional[int] = None
     button: Optional[str] = None
     text: Optional[str] = None
     key: Optional[str] = None
@@ -25,8 +27,8 @@ class Action:
 
 
 def _i8(x: int) -> int:
-    if x < -127 or x > 127:
-        raise ValueError("dx/dy must be in [-127,127]")
+    if x < -4096 or x > 4096:
+        raise ValueError("dx/dy must be in [-4096,4096]")
     return x
 
 
@@ -54,14 +56,22 @@ def parse_plan(plan: Dict[str, Any]) -> List[Action]:
             act.ms = ms
 
         elif t == "mouse_move":
-            act.dx = _i8(int(a.get("dx", 0)))
-            act.dy = _i8(int(a.get("dy", 0)))
+            if "dx" in a or "dy" in a:
+                act.dx = _i8(int(a.get("dx", 0)))
+                act.dy = _i8(int(a.get("dy", 0)))
+            if "x" in a or "y" in a:
+                # Absolute coordinates (pixels)
+                act.x = int(a.get("x", 0))
+                act.y = int(a.get("y", 0))
 
         elif t == "mouse_click":
             btn = a.get("button", "left")
             if btn not in ALLOWED_BUTTONS:
                 raise ValueError("mouse_click.button invalid")
             act.button = btn
+            if "x" in a or "y" in a:
+                act.x = int(a.get("x", 0))
+                act.y = int(a.get("y", 0))
 
         elif t == "type_text":
             text = a.get("text", "")

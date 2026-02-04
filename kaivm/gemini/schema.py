@@ -29,8 +29,10 @@ PLAN_SCHEMA = {
                 "properties": {
                     "type": {"type": "string", "enum": ACTION_TYPES},
                     "ms": {"type": "integer", "minimum": 0, "maximum": 60000},
-                    "dx": {"type": "integer", "minimum": -127, "maximum": 127},
-                    "dy": {"type": "integer", "minimum": -127, "maximum": 127},
+                    "dx": {"type": "integer", "minimum": -4096, "maximum": 4096},
+                    "dy": {"type": "integer", "minimum": -4096, "maximum": 4096},
+                    "x": {"type": "integer", "minimum": 0, "maximum": 10000},
+                    "y": {"type": "integer", "minimum": 0, "maximum": 10000},
                     "button": {"type": "string", "enum": ["left", "right", "middle"]},
                     "text": {"type": "string", "maxLength": 2000},
                     "key": {"type": "string", "maxLength": 64},

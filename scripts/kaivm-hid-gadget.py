@@ -26,10 +26,26 @@ MOUSE_DESC = bytes.fromhex(
     "95 02 81 06 c0 c0"
 )
 
+# Absolute mouse (Generic Desktop / Mouse)
+# Uses Usage Page: Generic Desktop (0x01), Usage: Mouse (0x02).
+# Added Physical Min/Max to match Logical to ensure linear mapping on all OSs.
+ABS_MOUSE_DESC = bytes.fromhex(
+    "05 01 09 02 a1 01 05 01 09 01 a1 00 05 09 19 01 29 03 15 00 25 01 "
+    "95 03 75 01 81 02 95 01 75 05 81 03 05 01 09 30 09 31 15 00 26 ff "
+    "7f 35 00 46 ff 7f 75 10 95 02 81 02 c0 c0"
+)
+
 def udc_name() -> str:
     return next(UDC_CLASS.iterdir()).name
 
 def write(p: Path, data: str | bytes) -> None:
+    # Wait for file to appear (ConfigFS race?)
+    deadline = time.time() + 2.0
+    while not p.exists():
+        if time.time() > deadline:
+            break
+        time.sleep(0.01)
+
     if isinstance(data, str):
         p.write_text(data)
     else:
@@ -48,7 +64,7 @@ def stop() -> None:
         return
     unbind()
     # remove links first
-    for link in ["hid.usb0", "hid.usb1"]:
+    for link in ["hid.usb0", "hid.usb1", "hid.usb2"]:
         try:
             (G / "configs/c.1" / link).unlink()
         except Exception:
@@ -59,6 +75,7 @@ def stop() -> None:
         G / "configs/c.1",
         G / "functions/hid.usb0",
         G / "functions/hid.usb1",
+        G / "functions/hid.usb2",
         G / "strings/0x409",
         G,
     ]:
@@ -111,9 +128,20 @@ def start() -> None:
     write(G / "functions/hid.usb1/no_out_endpoint", "1")
     write(G / "functions/hid.usb1/report_desc", MOUSE_DESC)
 
+    # Absolute Mouse function -> /dev/hidg2
+    # Protocol 0 (None) or 2 (Mouse)? 0 is usually safer for non-boot custom devices.
+    # Report length: 1 byte buttons + 4 bytes X/Y (2*2) = 5 bytes
+    (G / "functions/hid.usb2").mkdir(parents=True, exist_ok=True)
+    write(G / "functions/hid.usb2/protocol", "0") 
+    write(G / "functions/hid.usb2/subclass", "0")
+    write(G / "functions/hid.usb2/report_length", "5")
+    write(G / "functions/hid.usb2/no_out_endpoint", "1")
+    write(G / "functions/hid.usb2/report_desc", ABS_MOUSE_DESC)
+
     # Link into config
     os.symlink(str(G / "functions/hid.usb0"), str(G / "configs/c.1/hid.usb0"))
     os.symlink(str(G / "functions/hid.usb1"), str(G / "configs/c.1/hid.usb1"))
+    os.symlink(str(G / "functions/hid.usb2"), str(G / "configs/c.1/hid.usb2"))
 
     # Bind
     u = udc_name()

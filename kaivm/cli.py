@@ -10,10 +10,10 @@ from kaivm.agent.runner import AgentConfig, KaiVMAgent
 from kaivm.capture.daemon import main as capture_main
 from kaivm.gemini.client import DEFAULT_MODEL, GeminiPlanner
 from kaivm.hid.keyboard import KeyboardHID
-from kaivm.hid.mouse import MouseHID
+from kaivm.hid.mouse import MouseHID, AbsoluteMouseHID
 from kaivm.hid.udc import GADGET_UDC_PATH, udc_name, udc_state, usb_replug
 from kaivm.util.log import get_logger, setup_logging
-from kaivm.util.paths import LATEST_JPG, LIVE_MJPG, RUN_DIR
+from kaivm.util.paths import LATEST_JPG, LIVE_MJPG, RUN_DIR, CALIBRATION_FILE
 
 log = get_logger("kaivm.cli")
 
@@ -114,6 +114,22 @@ def cmd_mouse(args) -> int:
     return 0
 
 
+def cmd_calibrate(args) -> int:
+    setup_logging(args.verbose)
+    from kaivm.calibrate import calibrate_mouse_auto
+    m = AbsoluteMouseHID()
+    try:
+        res = calibrate_mouse_auto(m)
+        print("\nCalibration successful!")
+        print(f"Result: {res}")
+        print(f"Saved to: {CALIBRATION_FILE}")
+        print("This calibration will be used automatically by 'kaivm run'.")
+        return 0
+    except Exception as e:
+        log.error(f"Calibration failed: {e}")
+        return 1
+
+
 def cmd_usb_replug(args) -> int:
     setup_logging(args.verbose)
     usb_replug(settle=args.settle)
@@ -147,10 +163,37 @@ def cmd_run(args) -> int:
             thinking_level=args.thinking_level,
             timeout_steps=2,
         )
+        
+        cal_str = args.mouse_calibration
+        if cal_str is None:
+            if CALIBRATION_FILE.exists():
+                try:
+                    cal_str = CALIBRATION_FILE.read_text().strip()
+                    log.info(f"Loaded calibration from {CALIBRATION_FILE}: {cal_str}")
+                except Exception as e:
+                    log.warning(f"Failed to read calibration file: {e}")
+                    cal_str = "1.0,1.0,0.0,0.0"
+            else:
+                cal_str = "1.0,1.0,0.0,0.0"
+
+        if cal_str == "1.0,1.0,0.0,0.0":
+            log.warning("Using default/neutral calibration (1.0,1.0,0.0,0.0). If mouse accuracy is poor, please run 'kaivm calibrate'.")
+
+        cal_x_s, cal_y_s, cal_x_o, cal_y_o = 1.0, 1.0, 0.0, 0.0
+        try:
+            parts = [float(x.strip()) for x in cal_str.split(",")]
+            if len(parts) != 4:
+                raise ValueError("Must have 4 parts")
+            cal_x_s, cal_y_s, cal_x_o, cal_y_o = parts
+        except Exception as e:
+            print(f"Invalid calibration string '{cal_str}': {e}")
+            return 1
+
         agent = KaiVMAgent(
             planner=planner,
             kbd=KeyboardHID(),
             mouse=MouseHID(),
+            abs_mouse=AbsoluteMouseHID(),
             cfg=AgentConfig(
                 max_steps=args.max_steps,
                 overall_timeout_s=args.timeout,
@@ -159,6 +202,10 @@ def cmd_run(args) -> int:
                 confirm=args.confirm,
                 allow_danger=args.allow_danger,
                 do_replug=not args.no_replug,
+                cal_x_scale=cal_x_s,
+                cal_y_scale=cal_y_s,
+                cal_x_offset=cal_x_o,
+                cal_y_offset=cal_y_o,
             ),
         )
         result = agent.run(args.instruction)
@@ -208,6 +255,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--no-replug", action="store_true")
     sp.add_argument("--view", action="store_true")
     sp.add_argument("--view-fps", type=int, default=30)
+    sp.add_argument("--mouse-calibration", default=None, help="Calibration 'ScaleX,ScaleY,OffsetX,OffsetY'. Defaults to ~/.config/kaivm/calibration.txt or neutral.")
     sp.set_defaults(func=cmd_run)
 
     sp = sub.add_parser("type", help='Type text via HID: kaivm type "hello\\n"')
@@ -218,6 +266,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--move", nargs=2, type=int, metavar=("DX", "DY"))
     sp.add_argument("--click", choices=["left", "right", "middle"])
     sp.set_defaults(func=cmd_mouse)
+
+    sp = sub.add_parser("calibrate", help="Auto-calibrate mouse coordinates")
+    sp.set_defaults(func=cmd_calibrate)
 
     sp = sub.add_parser("usb", help="USB helper commands")
     usbsub = sp.add_subparsers(dest="usb_cmd", required=True)

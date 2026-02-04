@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import os
 import time
-from dataclasses import dataclass
-from typing import Dict, Tuple, List
+from dataclasses import dataclass, field
+from typing import Dict, Tuple, List, Optional
 
 from kaivm.hid.udc import wait_udc_configured
 from kaivm.util.log import get_logger
@@ -115,47 +115,58 @@ def _pack_report(mod: int, keys: List[int]) -> bytes:
 class KeyboardHID:
     dev: str = "/dev/hidg0"
     io_timeout: float = 5.0
+    _fd: Optional[int] = field(default=None, init=False, repr=False)
 
-    def _write_with_retry(self, payload: bytes, timeout: float) -> bool:
+    def _get_fd(self) -> int:
+        if self._fd is None:
+            self._fd = os.open(self.dev, os.O_WRONLY | os.O_NONBLOCK)
+        return self._fd
+
+    def _close_fd(self) -> None:
+        if self._fd is not None:
+            try:
+                os.close(self._fd)
+            except OSError:
+                pass
+            self._fd = None
+
+    def _write_with_retry(self, payload: bytes) -> None:
         """
         Nonblocking open+write with retry for EAGAIN; reopen on BrokenPipe.
         """
-        end = time.time() + timeout
-        while time.time() < end:
-            fd = os.open(self.dev, os.O_WRONLY | os.O_NONBLOCK)
+        end = time.time() + self.io_timeout
+        while True:
             try:
-                while time.time() < end:
-                    try:
-                        os.write(fd, payload)
-                        return True
-                    except BlockingIOError:
-                        time.sleep(0.01)
-                    except BrokenPipeError:
-                        time.sleep(0.1)
-                        break
-            finally:
-                os.close(fd)
-        return False
+                fd = self._get_fd()
+                os.write(fd, payload)
+                return
+            except BlockingIOError:
+                if time.time() >= end:
+                    raise TimeoutError(f"keyboard write timeout dev={self.dev}")
+                time.sleep(0.001)
+            except (BrokenPipeError, OSError) as e:
+                self._close_fd()
+                if time.time() >= end:
+                    raise e
+                time.sleep(0.05)
 
     def send_report(self, mod: int, keys: List[int]) -> None:
-        if not wait_udc_configured(timeout=20.0):
-            # In manual mode, we might just want to log and return instead of crashing
-            # But let's keep the check for safety.
-            raise RuntimeError("UDC not configured (host not enumerated?)")
-        
+        # Optimized: rely on write failure instead of checking UDC file
         payload = _pack_report(mod, keys)
-        if not self._write_with_retry(payload, timeout=self.io_timeout):
-            raise TimeoutError(f"keyboard write timeout dev={self.dev}")
+        self._write_with_retry(payload)
 
-    def send_key(self, mod: int, keycode: int, hold_ms: int = 30) -> None:
+    def send_key(self, mod: int, keycode: int, hold_ms: int = 15) -> None:
         self.send_report(mod, [keycode])
         time.sleep(hold_ms / 1000.0)
         self.send_report(0, [])
+    
+    def __del__(self) -> None:
+        self._close_fd()
 
-    def send_keycode(self, mod: int, key: int, hold_ms: int = 30) -> None:
+    def send_keycode(self, mod: int, key: int, hold_ms: int = 15) -> None:
         self.send_key(mod, key, hold_ms=hold_ms)
 
-    def send_text(self, text: str, inter_key_ms: int = 20) -> None:
+    def send_text(self, text: str, inter_key_ms: int = 5) -> None:
         for ch in text:
             if ch not in ASCII_MAP:
                 log.warning("No key mapping for %r; skipping", ch)

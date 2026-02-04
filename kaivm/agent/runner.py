@@ -10,8 +10,9 @@ from typing import Optional, List
 from kaivm.agent.validate import Action, is_dangerous_text, parse_plan
 from kaivm.gemini.client import GeminiPlanner
 from kaivm.hid.keyboard import KeyboardHID
-from kaivm.hid.mouse import MouseHID
+from kaivm.hid.mouse import MouseHID, AbsoluteMouseHID
 from kaivm.hid.udc import usb_replug
+from kaivm.util.image import get_image_size
 from kaivm.util.log import get_logger
 from kaivm.util.paths import LATEST_JPG, STOP_FILE, RUN_DIR
 
@@ -27,7 +28,7 @@ class AgentConfig:
     dry_run: bool = False
     confirm: bool = False
     allow_danger: bool = False
-    do_replug: bool = True
+    do_replug: bool = False
     dump_last_sent: bool = True
 
     # Closed-loop controls
@@ -37,12 +38,19 @@ class AgentConfig:
     frame_poll_s: float = 0.05
 
     # Smart waits injected by runner (ms)
-    type_to_enter_wait_ms: int = 120
-    app_launch_settle_ms: int = 1600
-    search_submit_settle_ms: int = 3000
+    type_to_enter_wait_ms: int = 50
+    app_launch_settle_ms: int = 1000
+    search_submit_settle_ms: int = 1500
 
     # Prevent premature termination
     min_steps_before_done: int = 2
+
+    # Mouse calibration (normalized 0.0-1.0)
+    # hid = img * scale + offset
+    cal_x_scale: float = 1.0
+    cal_y_scale: float = 1.0
+    cal_x_offset: float = 0.3587
+    cal_y_offset: float = 0.3547
 
 
 KEY_ALIASES = {
@@ -69,9 +77,15 @@ def _actions_brief(actions: List[Action]) -> str:
             t = a.text or ""
             out.append(f"type_text({t[:40]!r}{'…' if len(t) > 40 else ''})")
         elif a.type == "mouse_move":
-            out.append(f"mouse_move({a.dx},{a.dy})")
+            if a.x is not None and a.y is not None:
+                out.append(f"mouse_move(@{a.x},{a.y})")
+            else:
+                out.append(f"mouse_move({a.dx},{a.dy})")
         elif a.type == "mouse_click":
-            out.append(f"mouse_click({a.button})")
+            if a.x is not None and a.y is not None:
+                out.append(f"mouse_click({a.button}@{a.x},{a.y})")
+            else:
+                out.append(f"mouse_click({a.button})")
         elif a.type == "wait":
             out.append(f"wait({a.ms}ms)")
         elif a.type == "done":
@@ -259,16 +273,21 @@ class KaiVMAgent:
         kbd: KeyboardHID,
         mouse: MouseHID,
         cfg: AgentConfig,
+        abs_mouse: Optional[AbsoluteMouseHID] = None,
     ) -> None:
         self.planner = planner
         self.kbd = kbd
         self.mouse = mouse
+        self.abs_mouse = abs_mouse
         self.cfg = cfg
 
         self._prev_jpeg: Optional[bytes] = None
         self._prev_hash: Optional[str] = None
         self._last_actions_text: str = ""
         self._last_seen_mtime: float = 0.0
+        
+        self._last_abs_x: Optional[int] = None
+        self._last_abs_y: Optional[int] = None
 
     def _read_latest(self) -> bytes:
         p = self.cfg.latest_jpg
@@ -285,7 +304,21 @@ class KaiVMAgent:
         except Exception:
             pass
 
-    def _execute(self, a: Action) -> Optional[str]:
+    def _to_abs_hid(self, x: int, y: int) -> tuple[int, int]:
+        # Normalize from 0-1000 scale to 0.0-1.0
+        nx = x / 1000.0
+        ny = y / 1000.0
+        
+        # Apply calibration
+        nx = nx * self.cfg.cal_x_scale + self.cfg.cal_x_offset
+        ny = ny * self.cfg.cal_y_scale + self.cfg.cal_y_offset
+        
+        # Scale to HID
+        hx = int(round(nx * 32767))
+        hy = int(round(ny * 32767))
+        return hx, hy
+
+    def _execute(self, a: Action, screen_w: int = 1920, screen_h: int = 1080) -> Optional[str]:
         if a.type == "wait":
             time.sleep((a.ms or 0) / 1000.0)
             return None
@@ -294,10 +327,36 @@ class KaiVMAgent:
             return None
 
         if a.type == "mouse_move":
+            if a.x is not None and a.y is not None and self.abs_mouse:
+                x_abs, y_abs = self._to_abs_hid(a.x, a.y)
+                
+                log.info(f"MoveAbs: ({a.x}, {a.y}) -> ({x_abs}, {y_abs}) [cal s={self.cfg.cal_x_scale:.2f},{self.cfg.cal_y_scale:.2f} o={self.cfg.cal_x_offset:.2f},{self.cfg.cal_y_offset:.2f}]")
+                
+                self.abs_mouse.move(x_abs, y_abs)
+                self._last_abs_x = x_abs
+                self._last_abs_y = y_abs
+                return None
+            
+            # Fallback to relative
             self.mouse.move(a.dx or 0, a.dy or 0)
             return None
 
         if a.type == "mouse_click":
+            if self.abs_mouse:
+                if a.x is not None and a.y is not None:
+                    x_abs, y_abs = self._to_abs_hid(a.x, a.y)
+                    
+                    log.info(f"ClickAbs: ({a.x}, {a.y}) -> ({x_abs}, {y_abs})")
+                    self.abs_mouse.click(x_abs, y_abs, a.button or "left")
+                    self._last_abs_x = x_abs
+                    self._last_abs_y = y_abs
+                    return None
+
+                if self._last_abs_x is not None and self._last_abs_y is not None:
+                    # Click at last known position
+                    self.abs_mouse.click(self._last_abs_x, self._last_abs_y, a.button or "left")
+                    return None
+            
             self.mouse.click(a.button or "left")
             return None
 
@@ -338,8 +397,14 @@ class KaiVMAgent:
         if self.cfg.do_replug:
             usb_replug()
 
+        # Startup frame check: ensure we have a reasonably fresh frame
         if self.cfg.latest_jpg.exists():
             try:
+                st = self.cfg.latest_jpg.stat()
+                age = time.time() - st.st_mtime
+                if age > 2.0:
+                    log.info("Frame is stale (%.1fs old), waiting for fresh one...", age)
+                    _wait_for_new_frame(self.cfg.latest_jpg, st.st_mtime, timeout_s=3.0, poll_s=0.1)
                 self._last_seen_mtime = self.cfg.latest_jpg.stat().st_mtime
             except Exception:
                 self._last_seen_mtime = 0.0
@@ -438,8 +503,12 @@ class KaiVMAgent:
                 return "Stopped by user (confirm)"
 
             any_input = any(a.type in ("key", "type_text", "mouse_move", "mouse_click") for a in actions)
+            
+            # Get screen size for absolute mouse
+            screen_w, screen_h = get_image_size(jpeg)
+
             for a in actions:
-                res = self._execute(a)
+                res = self._execute(a, screen_w, screen_h)
                 if res is not None and a.type == "done":
                     return res
                 if res is not None:

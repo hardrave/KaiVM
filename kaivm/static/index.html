@@ -199,6 +199,15 @@
             white-space: pre-wrap;
             color: #ccc;
         }
+        .calib-block {
+            flex: 1;
+            height: 10px;
+            background: #333;
+            border-radius: 2px;
+            transition: background 0.2s;
+        }
+        .calib-block.active { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+        .calib-block.done { background: var(--success); }
     </style>
 </head>
 <body>
@@ -216,6 +225,19 @@
     </div>
     
     <div class="sidebar">
+        <div class="card" id="calibrationPanel" style="display:none; border-color: var(--accent);">
+            <h3>Calibration</h3>
+            <div id="calibProgress" style="display:flex; gap:6px; margin-bottom:16px;">
+                <div class="calib-block" id="cb0"></div>
+                <div class="calib-block" id="cb1"></div>
+                <div class="calib-block" id="cb2"></div>
+                <div class="calib-block" id="cb3"></div>
+                <div class="calib-block" id="cb4"></div>
+            </div>
+            <p id="calibMsg" style="font-size:0.9rem; margin: 0 0 16px 0; color: var(--text);">Starting...</p>
+            <button class="btn-stop" onclick="cancelCalibration()">Cancel Calibration</button>
+        </div>
+
         <div class="card" id="agentControls">
             <h3>Control Center</h3>
             
@@ -248,6 +270,10 @@
                 <button class="btn-stop" onclick="stopAgent()">STOP</button>
             </div>
             
+            <div style="margin-top: 10px;">
+                <button onclick="startCalibration()" style="background: #4b5563; color: white;">Calibrate Mouse</button>
+            </div>
+            
             <div id="statusIndicator">Status: Idle</div>
         </div>
 
@@ -263,6 +289,18 @@
 <script>
     let ws = null;
     let mode = 'agent';
+    let calibPoints = [];
+    let calibStep = 0;
+    
+    // Calibration points (HID coordinates 0-32767)
+    // Use points close to corners (e.g. ~200 units) to minimize "missed corner" confusion
+    const TARGETS = [
+        {x: 200, y: 200},     // Top-Left
+        {x: 32567, y: 200},   // Top-Right
+        {x: 32567, y: 32567}, // Bottom-Right
+        {x: 200, y: 32567},   // Bottom-Left
+        {x: 16383, y: 16383}  // Center
+    ];
 
     function setMode(m) {
         mode = m;
@@ -279,6 +317,12 @@
             stream.onclick = () => {
                 stream.requestPointerLock();
             };
+        } else if (mode === 'calibration') {
+             inputs.forEach(el => el.disabled = true);
+             document.getElementById('statusIndicator').innerText = "Status: Calibrating...";
+             // Remove pointer lock listeners or ignore them
+             if (document.exitPointerLock) document.exitPointerLock();
+             stream.onclick = handleCalibrationClick;
         } else {
             inputs.forEach(el => el.disabled = false);
             document.getElementById('statusIndicator').innerText = "Status: Idle";
@@ -292,6 +336,125 @@
                 ws.close();
                 ws = null;
             }
+        }
+    }
+    
+    async function startCalibration() {
+        if (!confirm("Start Mouse Calibration?\n\nThe mouse will move to 5 points.\nFor each point, CLICK EXACTLY ON THE MOUSE CURSOR in the video stream (even if it's not perfectly in the corner).")) return;
+        
+        setMode('calibration');
+        calibPoints = [];
+        calibStep = 0;
+        
+        document.getElementById('agentControls').style.display = 'none';
+        document.getElementById('calibrationPanel').style.display = 'flex';
+        
+        // Remove old markers
+        document.querySelectorAll('.calib-marker').forEach(e => e.remove());
+        
+        // Reset blocks
+        for(let i=0; i<5; i++) {
+            const el = document.getElementById('cb'+i);
+            el.className = 'calib-block';
+        }
+        
+        nextCalibrationStep();
+    }
+    
+    function cancelCalibration() {
+        document.getElementById('calibrationPanel').style.display = 'none';
+        document.getElementById('agentControls').style.display = 'flex';
+        document.querySelectorAll('.calib-marker').forEach(e => e.remove());
+        setMode('agent');
+    }
+    
+    async function nextCalibrationStep() {
+        if (calibStep >= TARGETS.length) {
+            finishCalibration();
+            return;
+        }
+        
+        const target = TARGETS[calibStep];
+        document.getElementById('calibMsg').innerText = `Step ${calibStep+1}: Moving mouse...`;
+        
+        // Update blocks
+        for(let i=0; i<5; i++) {
+            const el = document.getElementById('cb'+i);
+            if (i < calibStep) el.className = 'calib-block done';
+            else if (i === calibStep) el.className = 'calib-block active';
+            else el.className = 'calib-block';
+        }
+        
+        // Move mouse
+        try {
+            await fetch('/api/hid/move_absolute', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(target)
+            });
+        } catch (e) {
+            console.error("Move failed", e);
+        }
+        
+        setTimeout(() => {
+            document.getElementById('calibMsg').innerHTML = `Step ${calibStep+1}: <b>CLICK ON THE CURSOR</b>`;
+        }, 500);
+    }
+    
+    function handleCalibrationClick(e) {
+        if (mode !== 'calibration') return;
+        
+        const rect = e.target.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        // Visual feedback
+        const marker = document.createElement('div');
+        marker.className = 'calib-marker';
+        marker.style.position = 'absolute';
+        marker.style.left = (e.clientX + window.scrollX) + 'px';
+        marker.style.top = (e.clientY + window.scrollY) + 'px';
+        marker.style.width = '10px';
+        marker.style.height = '10px';
+        marker.style.background = 'red';
+        marker.style.borderRadius = '50%';
+        marker.style.transform = 'translate(-50%, -50%)';
+        marker.style.pointerEvents = 'none';
+        marker.style.zIndex = '1000';
+        document.body.appendChild(marker);
+        
+        const p = {
+            hid_x: TARGETS[calibStep].x,
+            hid_y: TARGETS[calibStep].y,
+            screen_x: Math.round(x * (e.target.naturalWidth / rect.width)),
+            screen_y: Math.round(y * (e.target.naturalHeight / rect.height)),
+            screen_w: e.target.naturalWidth,
+            screen_h: e.target.naturalHeight
+        };
+        
+        console.log("Calibration point:", p);
+        calibPoints.push(p);
+        
+        calibStep++;
+        nextCalibrationStep();
+    }
+    
+    async function finishCalibration() {
+        document.getElementById('calibMsg').innerText = "Calculating...";
+        
+        try {
+            const res = await fetch('/api/calibrate/calculate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({points: calibPoints})
+            });
+            const data = await res.json();
+            
+            alert("Calibration Complete & Saved!\n\nString: " + data.result);
+            cancelCalibration(); // Return to normal UI
+        } catch (e) {
+            alert("Error: " + e);
+            cancelCalibration();
         }
     }
 

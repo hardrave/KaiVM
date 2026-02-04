@@ -15,9 +15,9 @@ from pydantic import BaseModel
 from kaivm.agent.runner import AgentConfig, KaiVMAgent
 from kaivm.gemini.client import GeminiPlanner, DEFAULT_MODEL
 from kaivm.hid.keyboard import KeyboardHID, ASCII_MAP, KEYCODES, MOD_NAMES, MOD_LCTRL, MOD_LSHIFT, MOD_LALT, MOD_LGUI
-from kaivm.hid.mouse import MouseHID
+from kaivm.hid.mouse import MouseHID, AbsoluteMouseHID
 from kaivm.util.log import get_logger, setup_logging
-from kaivm.util.paths import LATEST_JPG
+from kaivm.util.paths import LATEST_JPG, STOP_FILE, CALIBRATION_FILE
 
 log = get_logger("kaivm.server")
 
@@ -29,6 +29,7 @@ class AppState:
     current_instruction: str = ""
     last_status: str = "Idle"
     planned_actions: List[Dict[str, Any]] = []
+    mouse_calibration: Optional[str] = None
 
 state = AppState()
 
@@ -36,6 +37,14 @@ state = AppState()
 async def lifespan(app: FastAPI):
     setup_logging(verbose=True)
     log.info("Server starting...")
+    
+    if CALIBRATION_FILE.exists():
+        try:
+            state.mouse_calibration = CALIBRATION_FILE.read_text().strip()
+            log.info(f"Loaded calibration: {state.mouse_calibration}")
+        except Exception as e:
+            log.error(f"Failed to load calibration: {e}")
+            
     yield
     log.info("Server shutting down...")
 
@@ -181,13 +190,114 @@ async def websocket_input(websocket: WebSocket):
 class RunRequest(BaseModel):
     instruction: str
     model: str = DEFAULT_MODEL
-    thinking_level: str = "low"
+    thinking_level: Optional[str] = None
     max_steps: int = 30
     allow_danger: bool = False
     dry_run: bool = False
     api_key: Optional[str] = None
 
+class MoveAbsRequest(BaseModel):
+    x: int
+    y: int
+
+class CalibrationPoint(BaseModel):
+    hid_x: int
+    hid_y: int
+    screen_x: int
+    screen_y: int
+    screen_w: int
+    screen_h: int
+
+class CalculateCalibrationRequest(BaseModel):
+    points: List[CalibrationPoint]
+
+@app.post("/api/hid/move_absolute")
+async def move_mouse_absolute(req: MoveAbsRequest):
+    mouse = AbsoluteMouseHID()
+    mouse.move(req.x, req.y)
+    return {"status": "moved", "x": req.x, "y": req.y}
+
+@app.post("/api/calibrate/calculate")
+async def calculate_calibration(req: CalculateCalibrationRequest):
+    if len(req.points) < 2:
+        return JSONResponse({"error": "Need at least 2 points"}, status_code=400)
+    
+    # We use a simple linear regression or just average scaling from pairs
+    # Logic: HID_norm = Screen_norm * Scale + Offset
+    # We want to find Scale and Offset that minimizes error, or just use min/max points.
+    
+    # Let's use the min/max approach similar to calibrate.py but robust to multiple points.
+    # Actually, if we have corners, we can just use linear fit.
+    
+    # Let's collect X and Y data separately
+    # X_hid_norm = X_screen_norm * Sx + Ox
+    
+    # We have list of (X_screen_norm, X_hid_norm)
+    data_x = []
+    data_y = []
+    
+    for p in req.points:
+        nx_screen = (p.screen_x + 0.5) / p.screen_w
+        ny_screen = (p.screen_y + 0.5) / p.screen_h
+        
+        nx_hid = p.hid_x / 32767.0
+        ny_hid = p.hid_y / 32767.0
+        
+        data_x.append((nx_screen, nx_hid))
+        data_y.append((ny_screen, ny_hid))
+        
+    def solve_linear(data):
+        # simple least squares for y = mx + c
+        # m = (N*sum(xy) - sum(x)sum(y)) / (N*sum(x^2) - sum(x)^2)
+        # c = (sum(y) - m*sum(x)) / N
+        N = len(data)
+        sum_x = sum(d[0] for d in data)
+        sum_y = sum(d[1] for d in data)
+        sum_xy = sum(d[0]*d[1] for d in data)
+        sum_xx = sum(d[0]**2 for d in data)
+        
+        denom = (N * sum_xx - sum_x**2)
+        if abs(denom) < 1e-9:
+            return 1.0, 0.0 # fallback
+            
+        m = (N * sum_xy - sum_x * sum_y) / denom
+        c = (sum_y - m * sum_x) / N
+        return m, c
+
+    sx, ox = solve_linear(data_x)
+    sy, oy = solve_linear(data_y)
+    
+    res = f"{sx:.4f},{sy:.4f},{ox:.4f},{oy:.4f}"
+    
+    log.info(f"Calibration Input Points (Screen -> HID):")
+    for i, p in enumerate(req.points):
+        log.info(f"  P{i}: Screen({p.screen_x},{p.screen_y}) -> HID({p.hid_x},{p.hid_y})")
+    
+    log.info(f"Calibration Result: Scale=({sx:.4f}, {sy:.4f}), Offset=({ox:.4f}, {oy:.4f})")
+    
+    if abs(ox) > 0.2 or abs(oy) > 0.2:
+        log.warning(f"Large calibration offset detected! (ox={ox:.2f}, oy={oy:.2f})")
+    if sx < 0.5 or sy < 0.5:
+        log.warning(f"Small calibration scale detected! (sx={sx:.2f}, sy={sy:.2f})")
+    
+    # Save to state and file
+    state.mouse_calibration = res
+    try:
+        CALIBRATION_FILE.parent.mkdir(parents=True, exist_ok=True)
+        CALIBRATION_FILE.write_text(res)
+        log.info(f"Saved calibration to {CALIBRATION_FILE}")
+    except Exception as e:
+        log.error(f"Failed to save calibration file: {e}")
+
+    return {"result": res}
+
 def _agent_runner_thread(req: RunRequest):
+    if STOP_FILE.exists():
+        try:
+            STOP_FILE.unlink()
+        except Exception:
+            pass
+
     state.agent_running = True
     state.current_instruction = req.instruction
     state.logs.append(f"Starting agent: {req.instruction}")
@@ -211,16 +321,32 @@ def _agent_runner_thread(req: RunRequest):
         
         # Let's subclass or wrap the agent to update our state.
         
+        # Parse calibration
+        cal_x_s, cal_y_s, cal_x_o, cal_y_o = 1.0, 1.0, 0.0, 0.0
+        if state.mouse_calibration:
+            try:
+                parts = [float(x.strip()) for x in state.mouse_calibration.split(",")]
+                if len(parts) == 4:
+                    cal_x_s, cal_y_s, cal_x_o, cal_y_o = parts
+                    state.logs.append(f"Using calibration: {state.mouse_calibration}")
+            except Exception as e:
+                state.logs.append(f"Invalid calibration ignored: {e}")
+
         agent = KaiVMAgent(
             planner=planner,
             kbd=KeyboardHID(),
             mouse=MouseHID(),
+            abs_mouse=AbsoluteMouseHID(),
             cfg=AgentConfig(
                 max_steps=req.max_steps,
                 overall_timeout_s=3600.0,
                 allow_danger=req.allow_danger,
                 dry_run=req.dry_run,
                 do_replug=True,
+                cal_x_scale=cal_x_s,
+                cal_y_scale=cal_y_s,
+                cal_x_offset=cal_x_o,
+                cal_y_offset=cal_y_o,
             ),
         )
         
@@ -273,7 +399,6 @@ async def run_agent(req: RunRequest, background_tasks: BackgroundTasks):
 @app.post("/api/stop")
 async def stop_agent():
     # Write stop file
-    from kaivm.util.paths import STOP_FILE
     STOP_FILE.touch()
     state.logs.append("Stop requested...")
     return {"status": "stopping"}
