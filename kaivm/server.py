@@ -10,7 +10,7 @@ from typing import Optional, List, Dict, Any, Set
 from fastapi import FastAPI, WebSocket, Request, BackgroundTasks, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from kaivm.agent.runner import AgentConfig, KaiVMAgent
 from kaivm.gemini.client import GeminiPlanner, DEFAULT_MODEL
@@ -195,6 +195,17 @@ class RunRequest(BaseModel):
     allow_danger: bool = False
     dry_run: bool = False
     api_key: Optional[str] = None
+    timeout: int = 120
+
+    @field_validator('max_steps')
+    @classmethod
+    def check_max_steps(cls, v: int) -> int:
+        return v if v > 0 else 10000
+
+    @field_validator('timeout')
+    @classmethod
+    def check_timeout(cls, v: int) -> int:
+        return v if v > 0 else 1440 # 24h
 
 class MoveAbsRequest(BaseModel):
     x: int
@@ -339,7 +350,7 @@ def _agent_runner_thread(req: RunRequest):
             abs_mouse=AbsoluteMouseHID(),
             cfg=AgentConfig(
                 max_steps=req.max_steps,
-                overall_timeout_s=3600.0,
+                overall_timeout_s=req.timeout * 60.0,
                 allow_danger=req.allow_danger,
                 dry_run=req.dry_run,
                 do_replug=True,

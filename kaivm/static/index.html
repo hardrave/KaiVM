@@ -471,9 +471,26 @@
                 <div style="font-size: 0.75rem; color: #666; margin-top: 6px;">Key is stored locally in your browser.</div>
             </div>
 
-            <div style="border-top: 1px solid var(--border); padding-top: 24px; margin-top: auto;">
-                <label style="margin-bottom: 12px;">Hardware Calibration</label>
-                <button onclick="startCalibration()" class="btn-secondary">Calibrate Mouse</button>
+            <div class="options-grid" style="margin-bottom: 20px;">
+                <div class="form-col" style="margin-bottom: 0;">
+                    <label>Max Steps (0=Unlim)</label>
+                    <input type="number" id="maxSteps" class="form-input" value="30" min="0" onchange="saveSettings()">
+                </div>
+                <div class="form-col" style="margin-bottom: 0;">
+                    <label>Timeout (min, 0=Unlim)</label>
+                    <input type="number" id="timeout" class="form-input" value="60" min="0" onchange="saveSettings()">
+                </div>
+            </div>
+
+            <div style="border-top: 1px solid var(--border); padding-top: 20px; margin-top: auto;">
+                <label style="display: block; font-size: 0.75rem; color: var(--text-muted); font-weight: 700; letter-spacing: 0.05em; margin-bottom: 12px;">HARDWARE SETUP</label>
+                <div style="background: var(--bg-input); padding: 12px; border-radius: 8px; border: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                    <div style="display: flex; flex-direction: column; gap: 2px;">
+                        <span style="font-size: 0.9rem; font-weight: 500; color: var(--text);">Mouse Calibration</span>
+                        <span style="font-size: 0.75rem; color: var(--text-muted);">Required for accurate clicks</span>
+                    </div>
+                    <button onclick="startCalibration()" class="btn-secondary" style="width: auto; padding: 6px 12px; font-size: 0.85rem; background: var(--bg-card);">Calibrate</button>
+                </div>
             </div>
 
             <div style="margin-top: 16px;">
@@ -508,6 +525,12 @@
         const key = localStorage.getItem('kaivm_api_key');
         if (key) document.getElementById('apiKey').value = key;
         
+        const steps = localStorage.getItem('kaivm_max_steps');
+        if (steps !== null) document.getElementById('maxSteps').value = steps;
+        
+        const timeout = localStorage.getItem('kaivm_timeout');
+        if (timeout !== null) document.getElementById('timeout').value = timeout;
+        
         // Auto-expand textarea removed to keep fixed height
         const tx = document.getElementById('instruction');
         
@@ -521,8 +544,9 @@
     });
 
     function saveSettings() {
-        const key = document.getElementById('apiKey').value;
-        localStorage.setItem('kaivm_api_key', key);
+        localStorage.setItem('kaivm_api_key', document.getElementById('apiKey').value);
+        localStorage.setItem('kaivm_max_steps', document.getElementById('maxSteps').value);
+        localStorage.setItem('kaivm_timeout', document.getElementById('timeout').value);
     }
 
     function toggleSettings() {
@@ -701,6 +725,8 @@
                     instruction,
                     model: document.getElementById('modelSelect').value,
                     api_key: document.getElementById('apiKey').value,
+                    max_steps: parseInt(document.getElementById('maxSteps').value) || 0,
+                    timeout: parseInt(document.getElementById('timeout').value) || 0,
                     allow_danger: document.getElementById('allowDanger').checked,
                     dry_run: document.getElementById('dryRun').checked
                 })
