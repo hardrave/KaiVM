@@ -8,7 +8,8 @@
         :root {
             --bg-dark: #0f0f0f;
             --bg-card: #1a1a1a;
-            --bg-input: #252525;
+            --bg-input: #2a2a2a;
+            --bg-hover: #333;
             --accent: #3b82f6;
             --accent-hover: #2563eb;
             --text: #e5e7eb;
@@ -17,6 +18,14 @@
             --success: #10b981;
             --border: #333;
         }
+        
+        * { box-sizing: border-box; }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+
         body { 
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background: var(--bg-dark); 
@@ -24,186 +33,344 @@
             margin: 0; 
             padding: 0;
             height: 100vh;
+            width: 100vw;
             display: flex;
             flex-direction: column;
+            overflow: hidden;
         }
+        
         header {
-            padding: 12px 24px;
+            padding: 0 20px;
+            height: 50px;
             background: var(--bg-card);
             border-bottom: 1px solid var(--border);
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-shrink: 0;
         }
-        header h1 { margin: 0; font-size: 1.2rem; font-weight: 600; color: var(--accent); }
+        header h1 { margin: 0; font-size: 1.1rem; font-weight: 600; color: var(--accent); letter-spacing: -0.02em; }
         
+        .header-controls {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+        .btn-icon {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 8px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        .btn-icon:hover { background: var(--bg-hover); color: var(--text); }
+
         .main-container { 
             display: flex; 
+            flex-direction: row;
             flex: 1;
             overflow: hidden;
             padding: 16px;
             gap: 16px;
+            min-height: 0;
         }
         
-        .video-column { 
+        /* LEFT COLUMN */
+        .left-column {
             flex: 1;
             display: flex;
             flex-direction: column;
-            min-width: 0; /* Important for flex shrink */
+            gap: 16px;
+            min-width: 0;
+            overflow: hidden;
         }
-        
+
         .video-box { 
             background: #000; 
             border: 1px solid var(--border); 
-            border-radius: 8px;
+            border-radius: 12px;
             flex: 1;
+            min-height: 0;
             display: flex; 
             align-items: center; 
             justify-content: center; 
             overflow: hidden;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
             position: relative;
         }
         img#stream { 
-            max-width: 100%; 
-            max-height: 100%; 
+            width: 100%; 
+            height: 100%; 
             object-fit: contain;
             cursor: crosshair;
         }
-        
-        .sidebar { 
+
+        /* MODERN INPUT AREA */
+        .controls-card {
+            background: transparent;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            flex-shrink: 0;
+	    width: 100%;
+        }
+
+        .input-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 0 4px;
+        }
+
+        .pill-select-wrapper {
+            position: relative;
+        }
+        .pill-select {
+            appearance: none;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 6px 32px 6px 12px;
+            border-radius: 16px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .pill-select:hover { border-color: #555; }
+        .pill-select:focus { border-color: var(--accent); }
+        .chevron-icon {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            pointer-events: none;
+            color: var(--text-muted);
+            font-size: 0.7rem;
+        }
+
+        .toggle-pill {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 16px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            cursor: pointer;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            user-select: none;
+            transition: all 0.2s;
+        }
+        .toggle-pill:hover { border-color: #555; color: var(--text); }
+        .toggle-pill input { display: none; }
+        .toggle-pill:has(input:checked) {
+            background: rgba(59, 130, 246, 0.15);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .toggle-pill.danger:has(input:checked) {
+            background: rgba(239, 68, 68, 0.15);
+            border-color: var(--danger);
+            color: var(--danger);
+        }
+
+        .chat-bar {
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 8px 8px 8px 20px;
+            display: flex;
+            align-items: flex-end; /* Align bottom for multiline */
+            gap: 12px;
+            transition: border-color 0.2s;
+            position: relative;
+        }
+        .chat-bar:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+        textarea { 
+            flex: 1;
+            background: transparent;
+            color: var(--text);
+            border: none;
+            padding: 8px 0;
+            font-family: inherit;
+            font-size: 1rem;
+            resize: none;
+            height: 56px; /* Base height */
+            outline: none;
+            line-height: 1.5;
+        }
+        textarea::placeholder { color: #666; }
+
+        .action-buttons {
+            display: flex;
+            gap: 8px;
+            padding-bottom: 4px;
+        }
+
+        .btn-circle {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            color: white;
+            flex-shrink: 0;
+        }
+        .btn-run { background: var(--text); color: var(--bg-dark); }
+        .btn-run:hover { background: white; }
+        .btn-run:disabled { opacity: 0.5; cursor: default; }
+
+        .btn-stop { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
+        .btn-stop:hover { background: var(--danger); color: white; }
+
+
+        /* RIGHT COLUMN */
+        .right-column { 
             width: 380px;
             display: flex;
             flex-direction: column;
             gap: 16px;
-            overflow-y: auto;
+            flex-shrink: 0;
+            overflow: hidden;
         }
         
         .card {
             background: var(--bg-card);
             border: 1px solid var(--border);
-            border-radius: 8px;
+            border-radius: 12px;
             padding: 16px;
             display: flex;
             flex-direction: column;
         }
-        .card h3, .card h4 { margin: 0 0 12px 0; font-size: 0.95rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+        .card h3, .card h4 { margin: 0 0 12px 0; font-size: 0.8rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
         
         .mode-switch {
             display: flex;
             background: var(--bg-input);
-            padding: 4px;
-            border-radius: 6px;
-            margin-bottom: 16px;
+            padding: 3px;
+            border-radius: 8px;
+            margin-bottom: 12px;
         }
         .mode-switch label {
             flex: 1;
             text-align: center;
-            padding: 8px;
+            padding: 6px;
             cursor: pointer;
-            border-radius: 4px;
-            font-size: 0.9rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 500;
             transition: all 0.2s;
+            color: var(--text-muted);
         }
         .mode-switch input { display: none; }
         .mode-switch label:has(input:checked) {
-            background: var(--accent);
-            color: white;
-            font-weight: 500;
-        }
-
-        textarea { 
-            width: 100%; 
-            height: 80px; 
-            background: var(--bg-input); 
-            color: var(--text); 
-            border: 1px solid var(--border); 
-            border-radius: 6px;
-            padding: 10px; 
-            box-sizing: border-box; 
-            font-family: inherit;
-            resize: none;
-            margin-bottom: 12px;
-        }
-        textarea:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
-        
-        .form-row { margin-bottom: 12px; }
-        select, input[type="password"] {
-            width: 100%;
-            background: var(--bg-input);
+            background: var(--bg-card);
             color: var(--text);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 10px;
-            box-sizing: border-box;
-            font-size: 0.9rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
         }
 
-        .options-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-bottom: 16px;
-        }
-        .options-grid label {
-            font-size: 0.85rem;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            color: var(--text-muted);
-        }
-
-        .actions-group { display: flex; gap: 10px; }
-        button {
-            flex: 1;
-            padding: 12px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: 600;
-            font-size: 0.9rem;
-            transition: opacity 0.2s;
-        }
-        button:disabled { opacity: 0.4; cursor: not-allowed; }
-        .btn-run { background: var(--success); color: white; }
-        .btn-stop { background: var(--danger); color: white; }
-        
         #statusIndicator {
-            margin-top: 12px;
-            font-size: 0.85rem;
+            font-size: 0.8rem;
             color: var(--text-muted);
-            padding: 8px;
+            padding: 8px 12px;
             background: rgba(0,0,0,0.2);
-            border-radius: 4px;
+            border-radius: 6px;
             border-left: 3px solid var(--accent);
         }
 
-        .plan-box { flex: 1; min-height: 150px; }
-        #planList { font-size: 0.85rem; overflow-y: auto; flex: 1; }
-        .action-item {
-            padding: 8px;
-            border-bottom: 1px solid var(--border);
-            color: var(--text-muted);
+        .flex-scroll-container {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            flex: 1;
+            min-height: 0;
+            overflow: hidden;
         }
-        .action-item:last-child { border-bottom: none; }
-        
+
+        .thinking-card { flex: 3; min-height: 0; }
         .status-box {
-            height: 200px;
+            flex: 1;
             font-family: "JetBrains Mono", "Fira Code", monospace;
-            font-size: 0.8rem;
+            font-size: 0.75rem;
+            line-height: 1.4;
             background: #000;
             padding: 12px;
             border: 1px solid var(--border);
-            border-radius: 6px;
+            border-radius: 8px;
             overflow-y: auto;
             white-space: pre-wrap;
             color: #ccc;
         }
+
+        .plan-card { flex: 2; min-height: 0; }
+        #planList { 
+            font-size: 0.85rem; 
+            overflow-y: auto; 
+            flex: 1; 
+            padding-right: 4px;
+        }
+        .action-item {
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-muted);
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+        }
+        .action-item:last-child { border-bottom: none; }
+        .tag {
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: var(--bg-input);
+            color: var(--text);
+            font-family: monospace;
+        }
+        
+        /* Settings Inputs */
+        .form-col { margin-bottom: 20px; }
+        .form-col label { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 8px; }
+        .form-input {
+            width: 100%;
+            background: var(--bg-input);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px;
+            font-size: 0.9rem;
+            outline: none;
+        }
+        .form-input:focus { border-color: var(--accent); }
+        
+        .btn-secondary { 
+            width: 100%; 
+            padding: 10px; 
+            background: var(--bg-input); 
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        .btn-secondary:hover { background: var(--bg-hover); }
+
         .calib-block {
             flex: 1;
-            height: 10px;
+            height: 6px;
             background: #333;
-            border-radius: 2px;
+            border-radius: 3px;
             transition: background 0.2s;
         }
         .calib-block.active { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
@@ -214,18 +381,106 @@
 
 <header>
     <h1>kaiVM</h1>
-    <div id="connectionStatus" style="font-size: 0.8rem; color: var(--success);">● System Online</div>
+    <div class="header-controls">
+        <div id="connectionStatus" style="font-size: 0.8rem; color: var(--success); margin-right: 8px;">● System Online</div>
+        <button class="btn-icon" onclick="toggleSettings()" title="Settings">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+        </button>
+    </div>
 </header>
 
 <div class="main-container">
-    <div class="video-column">
+    <!-- LEFT: Video + Inputs -->
+    <div class="left-column">
         <div class="video-box">
             <img id="stream" src="/stream" alt="Remote Stream">
         </div>
+        
+        <div class="controls-card" id="inputPanel">
+            <!-- Toolbar -->
+            <div class="input-toolbar">
+                <div class="pill-select-wrapper">
+                    <select id="modelSelect" class="pill-select">
+                        <option value="gemini-3-flash-preview" selected>Gemini 3 Flash</option>
+                        <option value="gemini-3-pro-preview">Gemini 3 Pro</option>
+                        <option value="gemini-2.0-flash-thinking-exp-01-21">Gemini 2.0 Flash Thinking</option>
+                    </select>
+                    <span class="chevron-icon">▼</span>
+                </div>
+                
+                <label class="toggle-pill danger" title="Allow the agent to perform dangerous actions">
+                    <input type="checkbox" id="allowDanger">
+                    <span>⚡ Danger</span>
+                </label>
+                
+                <label class="toggle-pill" title="Simulate actions without executing">
+                    <input type="checkbox" id="dryRun">
+                    <span>🧪 Dry Run</span>
+                </label>
+            </div>
+
+            <!-- Chat Bar -->
+            <div class="chat-bar">
+                <textarea id="instruction" placeholder="Ask KaiVM to do something..."></textarea>
+                
+                <div class="action-buttons">
+                    <button class="btn-circle btn-stop" onclick="stopAgent()" title="Stop Agent" id="stopBtn" style="display:none">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                    </button>
+                    <button class="btn-circle btn-run" onclick="runAgent()" title="Run Agent" id="runBtn">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
     
-    <div class="sidebar">
-        <div class="card" id="calibrationPanel" style="display:none; border-color: var(--accent);">
+    <!-- RIGHT: Status/Mode/Logs -->
+    <div class="right-column">
+        
+        <!-- Standard Right Panel Content -->
+        <div id="rightPanelContent" class="flex-scroll-container">
+            <div class="card" style="flex-shrink: 0;">
+                <div class="mode-switch">
+                    <label><input type="radio" name="mode" value="agent" checked onchange="setMode('agent')"> Agent</label>
+                    <label><input type="radio" name="mode" value="manual" onchange="setMode('manual')"> Manual</label>
+                </div>
+                <div id="statusIndicator">Status: Idle</div>
+            </div>
+
+            <div class="card thinking-card">
+                <h4>Agent Thinking</h4>
+                <div class="status-box" id="logs"></div>
+            </div>
+
+            <div class="card plan-card">
+                <h4>Planned Actions</h4>
+                <div id="planList"></div>
+            </div>
+        </div>
+
+        <!-- Settings Panel -->
+        <div class="card" id="settingsPanel" style="display:none; border-color: var(--text-muted); flex: 1;">
+            <h3 style="font-size: 1rem; color: var(--text); margin-bottom: 24px;">Configuration</h3>
+            
+            <div class="form-col">
+                <label>Gemini API Key</label>
+                <input type="password" id="apiKey" class="form-input" placeholder="sk-..." onchange="saveSettings()">
+                <div style="font-size: 0.75rem; color: #666; margin-top: 6px;">Key is stored locally in your browser.</div>
+            </div>
+
+            <div style="border-top: 1px solid var(--border); padding-top: 24px; margin-top: auto;">
+                <label style="margin-bottom: 12px;">Hardware Calibration</label>
+                <button onclick="startCalibration()" class="btn-secondary">Calibrate Mouse</button>
+            </div>
+
+            <div style="margin-top: 16px;">
+                <button onclick="toggleSettings()" class="btn-secondary" style="border-color: transparent;">Close Settings</button>
+            </div>
+        </div>
+
+        <!-- Calibration Panel -->
+        <div class="card" id="calibrationPanel" style="display:none; border-color: var(--accent); flex: 1;">
             <h3>Calibration</h3>
             <div id="calibProgress" style="display:flex; gap:6px; margin-bottom:16px;">
                 <div class="calib-block" id="cb0"></div>
@@ -235,54 +490,9 @@
                 <div class="calib-block" id="cb4"></div>
             </div>
             <p id="calibMsg" style="font-size:0.9rem; margin: 0 0 16px 0; color: var(--text);">Starting...</p>
-            <button class="btn-stop" onclick="cancelCalibration()">Cancel Calibration</button>
+            <button class="btn-secondary" style="color: var(--danger); border-color: var(--danger);" onclick="cancelCalibration()">Cancel</button>
         </div>
 
-        <div class="card" id="agentControls">
-            <h3>Control Center</h3>
-            
-            <div class="mode-switch">
-                <label><input type="radio" name="mode" value="agent" checked onchange="setMode('agent')"> Agent</label>
-                <label><input type="radio" name="mode" value="manual" onchange="setMode('manual')"> Manual</label>
-            </div>
-
-            <textarea id="instruction" placeholder="Enter instruction for the agent..."></textarea>
-            
-            <div class="form-row">
-                <select id="modelSelect">
-                    <option value="gemini-3-flash-preview" selected>Gemini 3 Flash (Fast)</option>
-                    <option value="gemini-3-pro-preview">Gemini 3 Pro (Smarter)</option>
-                    <option value="gemini-2.0-flash-thinking-exp-01-21">Gemini 2.0 Flash Thinking</option>
-                </select>
-            </div>
-
-            <div class="form-row">
-                <input type="password" id="apiKey" placeholder="Gemini API Key (optional)">
-            </div>
-
-            <div class="options-grid">
-                <label><input type="checkbox" id="allowDanger"> Allow Danger</label>
-                <label><input type="checkbox" id="dryRun"> Dry Run</label>
-            </div>
-
-            <div class="actions-group">
-                <button class="btn-run" onclick="runAgent()">RUN AGENT</button>
-                <button class="btn-stop" onclick="stopAgent()">STOP</button>
-            </div>
-            
-            <div style="margin-top: 10px;">
-                <button onclick="startCalibration()" style="background: #4b5563; color: white;">Calibrate Mouse</button>
-            </div>
-            
-            <div id="statusIndicator">Status: Idle</div>
-        </div>
-
-        <div class="card plan-box">
-            <h4>Planned Actions</h4>
-            <div id="planList"></div>
-        </div>
-
-        <div class="status-box" id="logs"></div>
     </div>
 </div>
 
@@ -292,170 +502,149 @@
     let calibPoints = [];
     let calibStep = 0;
     
-    // Calibration points (HID coordinates 0-32767)
-    // Use points close to corners (e.g. ~200 units) to minimize "missed corner" confusion
+    window.addEventListener('DOMContentLoaded', () => {
+        const key = localStorage.getItem('kaivm_api_key');
+        if (key) document.getElementById('apiKey').value = key;
+        
+        // Auto-expand textarea
+        const tx = document.getElementById('instruction');
+        tx.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = (this.scrollHeight) + 'px';
+            if(this.value === '') this.style.height = '56px';
+        });
+        
+        // Submit on Enter (without shift)
+        tx.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                runAgent();
+            }
+        });
+    });
+
+    function saveSettings() {
+        const key = document.getElementById('apiKey').value;
+        localStorage.setItem('kaivm_api_key', key);
+    }
+
+    function toggleSettings() {
+        const settings = document.getElementById('settingsPanel');
+        const main = document.getElementById('rightPanelContent');
+        const calib = document.getElementById('calibrationPanel');
+        
+        if (settings.style.display !== 'none' || calib.style.display !== 'none') {
+            settings.style.display = 'none';
+            calib.style.display = 'none';
+            main.style.display = 'flex';
+        } else {
+            main.style.display = 'none';
+            calib.style.display = 'none';
+            settings.style.display = 'flex';
+        }
+    }
+
     const TARGETS = [
-        {x: 200, y: 200},     // Top-Left
-        {x: 32567, y: 200},   // Top-Right
-        {x: 32567, y: 32567}, // Bottom-Right
-        {x: 200, y: 32567},   // Bottom-Left
-        {x: 16383, y: 16383}  // Center
+        {x: 200, y: 200}, {x: 32567, y: 200}, {x: 32567, y: 32567}, {x: 200, y: 32567}, {x: 16383, y: 16383}
     ];
 
     function setMode(m) {
         mode = m;
         const stream = document.getElementById('stream');
-        const inputs = document.querySelectorAll('#instruction, #apiKey, #modelSelect, .btn-run, .options-grid input');
+        const inputs = document.querySelectorAll('#instruction, #modelSelect, #runBtn, #stopBtn, .toggle-pill input');
         
         if (mode === 'manual') {
             inputs.forEach(el => el.disabled = true);
-            document.getElementById('statusIndicator').innerText = "Status: Manual Mode (Click video to capture)";
+            document.getElementById('statusIndicator').innerText = "Status: Manual Mode";
             document.getElementById('statusIndicator').style.borderLeftColor = 'var(--success)';
-            
             connectWS();
-            
-            stream.onclick = () => {
-                stream.requestPointerLock();
-            };
+            stream.onclick = () => stream.requestPointerLock();
         } else if (mode === 'calibration') {
              inputs.forEach(el => el.disabled = true);
              document.getElementById('statusIndicator').innerText = "Status: Calibrating...";
-             // Remove pointer lock listeners or ignore them
              if (document.exitPointerLock) document.exitPointerLock();
              stream.onclick = handleCalibrationClick;
         } else {
             inputs.forEach(el => el.disabled = false);
             document.getElementById('statusIndicator').innerText = "Status: Idle";
             document.getElementById('statusIndicator').style.borderLeftColor = 'var(--accent)';
-            
             if (document.exitPointerLock) document.exitPointerLock();
-            stream.onclick = function() {
-                this.src = '/stream?' + new Date().getTime();
-            };
-            if (ws) {
-                ws.close();
-                ws = null;
-            }
+            stream.onclick = function() { this.src = '/stream?' + new Date().getTime(); };
+            if (ws) { ws.close(); ws = null; }
         }
     }
     
     async function startCalibration() {
-        if (!confirm("Start Mouse Calibration?\n\nThe mouse will move to 5 points.\nFor each point, CLICK EXACTLY ON THE MOUSE CURSOR in the video stream (even if it's not perfectly in the corner).")) return;
-        
+        if (!confirm("Start Mouse Calibration?\n\nFollow the instructions to click the cursor in 5 positions.")) return;
         setMode('calibration');
         calibPoints = [];
         calibStep = 0;
-        
-        document.getElementById('agentControls').style.display = 'none';
+        document.getElementById('settingsPanel').style.display = 'none';
+        document.getElementById('rightPanelContent').style.display = 'none';
         document.getElementById('calibrationPanel').style.display = 'flex';
-        
-        // Remove old markers
         document.querySelectorAll('.calib-marker').forEach(e => e.remove());
-        
-        // Reset blocks
-        for(let i=0; i<5; i++) {
-            const el = document.getElementById('cb'+i);
-            el.className = 'calib-block';
-        }
-        
+        for(let i=0; i<5; i++) document.getElementById('cb'+i).className = 'calib-block';
         nextCalibrationStep();
     }
     
     function cancelCalibration() {
         document.getElementById('calibrationPanel').style.display = 'none';
-        document.getElementById('agentControls').style.display = 'flex';
+        document.getElementById('rightPanelContent').style.display = 'flex'; 
         document.querySelectorAll('.calib-marker').forEach(e => e.remove());
         setMode('agent');
     }
     
     async function nextCalibrationStep() {
-        if (calibStep >= TARGETS.length) {
-            finishCalibration();
-            return;
-        }
-        
+        if (calibStep >= TARGETS.length) { finishCalibration(); return; }
         const target = TARGETS[calibStep];
         document.getElementById('calibMsg').innerText = `Step ${calibStep+1}: Moving mouse...`;
-        
-        // Update blocks
         for(let i=0; i<5; i++) {
             const el = document.getElementById('cb'+i);
             if (i < calibStep) el.className = 'calib-block done';
             else if (i === calibStep) el.className = 'calib-block active';
             else el.className = 'calib-block';
         }
-        
-        // Move mouse
         try {
             await fetch('/api/hid/move_absolute', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(target)
+                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(target)
             });
-        } catch (e) {
-            console.error("Move failed", e);
-        }
-        
-        setTimeout(() => {
-            document.getElementById('calibMsg').innerHTML = `Step ${calibStep+1}: <b>CLICK ON THE CURSOR</b>`;
-        }, 500);
+        } catch (e) { console.error("Move failed", e); }
+        setTimeout(() => { document.getElementById('calibMsg').innerHTML = `Step ${calibStep+1}: <b>CLICK ON THE CURSOR</b>`; }, 500);
     }
     
     function handleCalibrationClick(e) {
         if (mode !== 'calibration') return;
-        
         const rect = e.target.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
-        
-        // Visual feedback
         const marker = document.createElement('div');
         marker.className = 'calib-marker';
-        marker.style.position = 'absolute';
-        marker.style.left = (e.clientX + window.scrollX) + 'px';
-        marker.style.top = (e.clientY + window.scrollY) + 'px';
-        marker.style.width = '10px';
-        marker.style.height = '10px';
-        marker.style.background = 'red';
-        marker.style.borderRadius = '50%';
-        marker.style.transform = 'translate(-50%, -50%)';
-        marker.style.pointerEvents = 'none';
-        marker.style.zIndex = '1000';
+        Object.assign(marker.style, {
+            position: 'absolute', left: (e.clientX + window.scrollX) + 'px', top: (e.clientY + window.scrollY) + 'px',
+            width: '10px', height: '10px', background: 'red', borderRadius: '50%', transform: 'translate(-50%, -50%)',
+            pointerEvents: 'none', zIndex: '1000'
+        });
         document.body.appendChild(marker);
-        
-        const p = {
-            hid_x: TARGETS[calibStep].x,
-            hid_y: TARGETS[calibStep].y,
+        calibPoints.push({
+            hid_x: TARGETS[calibStep].x, hid_y: TARGETS[calibStep].y,
             screen_x: Math.round(x * (e.target.naturalWidth / rect.width)),
             screen_y: Math.round(y * (e.target.naturalHeight / rect.height)),
-            screen_w: e.target.naturalWidth,
-            screen_h: e.target.naturalHeight
-        };
-        
-        console.log("Calibration point:", p);
-        calibPoints.push(p);
-        
+            screen_w: e.target.naturalWidth, screen_h: e.target.naturalHeight
+        });
         calibStep++;
         nextCalibrationStep();
     }
     
     async function finishCalibration() {
         document.getElementById('calibMsg').innerText = "Calculating...";
-        
         try {
             const res = await fetch('/api/calibrate/calculate', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({points: calibPoints})
+                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({points: calibPoints})
             });
             const data = await res.json();
-            
-            alert("Calibration Complete & Saved!\n\nString: " + data.result);
-            cancelCalibration(); // Return to normal UI
-        } catch (e) {
-            alert("Error: " + e);
+            alert("Calibration Complete & Saved!\n\n" + data.result);
             cancelCalibration();
-        }
+        } catch (e) { alert("Error: " + e); cancelCalibration(); }
     }
 
     function connectWS() {
@@ -465,92 +654,70 @@
         ws.onclose = () => { ws = null; console.log("Input WS closed"); };
     }
 
-    // Input Capture
-    document.addEventListener('pointerlockchange', () => {
-        const stream = document.getElementById('stream');
-        if (document.pointerLockElement === stream) {
-            console.log("Pointer locked");
-        } else {
-            console.log("Pointer unlocked");
-        }
-    });
-
+    // Input listeners (simplified for brevity)
     document.addEventListener('mousemove', e => {
         if (!ws || document.pointerLockElement !== document.getElementById('stream')) return;
-        ws.send(JSON.stringify({
-            type: 'mousemove',
-            dx: e.movementX,
-            dy: e.movementY,
-            buttons: e.buttons
-        }));
+        ws.send(JSON.stringify({type: 'mousemove', dx: e.movementX, dy: e.movementY, buttons: e.buttons}));
     });
-
     document.addEventListener('mousedown', e => {
         if (!ws || document.pointerLockElement !== document.getElementById('stream')) return;
-        ws.send(JSON.stringify({
-            type: 'mousedown',
-            button: e.button,
-            buttons: e.buttons
-        }));
+        ws.send(JSON.stringify({type: 'mousedown', button: e.button, buttons: e.buttons}));
     });
-
     document.addEventListener('mouseup', e => {
         if (!ws || document.pointerLockElement !== document.getElementById('stream')) return;
-        ws.send(JSON.stringify({
-            type: 'mouseup',
-            button: e.button,
-            buttons: e.buttons
-        }));
+        ws.send(JSON.stringify({type: 'mouseup', button: e.button, buttons: e.buttons}));
     });
-
     document.addEventListener('keydown', e => {
         if (!ws || document.pointerLockElement !== document.getElementById('stream')) return;
         e.preventDefault();
-        ws.send(JSON.stringify({
-            type: 'keydown',
-            key: e.key,
-            code: e.code,
-            ctrlKey: e.ctrlKey,
-            shiftKey: e.shiftKey,
-            altKey: e.altKey,
-            metaKey: e.metaKey
-        }));
+        ws.send(JSON.stringify({type: 'keydown', key: e.key, code: e.code, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey}));
     });
-
     document.addEventListener('keyup', e => {
         if (!ws || document.pointerLockElement !== document.getElementById('stream')) return;
         e.preventDefault();
-        ws.send(JSON.stringify({
-            type: 'keyup',
-            key: e.key,
-            code: e.code,
-            ctrlKey: e.ctrlKey,
-            shiftKey: e.shiftKey,
-            altKey: e.altKey,
-            metaKey: e.metaKey
-        }));
+        ws.send(JSON.stringify({type: 'keyup', key: e.key, code: e.code, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey}));
     });
+
+    // Update UI state based on running status
+    function updateRunState(running) {
+        const runBtn = document.getElementById('runBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        if (running) {
+            runBtn.style.display = 'none';
+            stopBtn.style.display = 'flex';
+        } else {
+            runBtn.style.display = 'flex';
+            stopBtn.style.display = 'none';
+        }
+    }
 
     async function runAgent() {
         const instruction = document.getElementById('instruction').value;
-        if (!instruction) return alert("Enter an instruction");
+        if (!instruction.trim()) return;
         
-        await fetch('/api/run', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                instruction,
-                model: document.getElementById('modelSelect').value,
-                api_key: document.getElementById('apiKey').value,
-                allow_danger: document.getElementById('allowDanger').checked,
-                dry_run: document.getElementById('dryRun').checked
-            })
-        });
-        pollState();
+        updateRunState(true);
+        try {
+            await fetch('/api/run', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    instruction,
+                    model: document.getElementById('modelSelect').value,
+                    api_key: document.getElementById('apiKey').value,
+                    allow_danger: document.getElementById('allowDanger').checked,
+                    dry_run: document.getElementById('dryRun').checked
+                })
+            });
+            pollState();
+        } catch (e) {
+            console.error(e);
+            updateRunState(false);
+        }
     }
 
     async function stopAgent() {
         await fetch('/api/stop', { method: 'POST' });
+        // State polling will eventually set running=false
     }
 
     function renderActions(actions) {
@@ -559,14 +726,23 @@
         actions.forEach(a => {
             const d = document.createElement('div');
             d.className = 'action-item';
-            let txt = `[${a.type}] `;
-            if (a.key) txt += a.key;
-            if (a.text) txt += `"${a.text}"`;
-            if (a.dx || a.dy) txt += `(${a.dx}, ${a.dy})`;
-            if (a.button) txt += a.button;
-            if (a.ms) txt += `${a.ms}ms`;
-            if (a.summary) txt += a.summary;
-            d.innerText = txt;
+            
+            const tag = document.createElement('span');
+            tag.className = 'tag';
+            tag.innerText = a.type.toUpperCase();
+            
+            const txt = document.createElement('span');
+            let content = "";
+            if (a.key) content += a.key;
+            if (a.text) content += `"${a.text}"`;
+            if (a.dx || a.dy) content += `(${a.dx}, ${a.dy})`;
+            if (a.button) content += a.button;
+            if (a.ms) content += `${a.ms}ms`;
+            if (a.summary) content += a.summary;
+            txt.innerText = content;
+            
+            d.appendChild(tag);
+            d.appendChild(txt);
             div.appendChild(d);
         });
     }
@@ -583,6 +759,7 @@
             logs.scrollTop = logs.scrollHeight;
             
             renderActions(data.planned_actions);
+            updateRunState(data.running);
             
             if (data.running) {
                 setTimeout(pollState, 1000);
@@ -596,7 +773,6 @@
     // Start polling
     pollState();
     
-    // Refresh video on click if stuck
     document.getElementById('stream').onclick = function() {
         this.src = '/stream?' + new Date().getTime();
     };
