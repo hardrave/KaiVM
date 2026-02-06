@@ -204,6 +204,8 @@
             font-size: 1rem;
             resize: none;
             height: 56px; /* Base height */
+            max-height: 150px; /* Limit height */
+            overflow-y: auto;
             outline: none;
             line-height: 1.5;
         }
@@ -506,13 +508,8 @@
         const key = localStorage.getItem('kaivm_api_key');
         if (key) document.getElementById('apiKey').value = key;
         
-        // Auto-expand textarea
+        // Auto-expand textarea removed to keep fixed height
         const tx = document.getElementById('instruction');
-        tx.addEventListener('input', function() {
-            this.style.height = 'auto';
-            this.style.height = (this.scrollHeight) + 'px';
-            if(this.value === '') this.style.height = '56px';
-        });
         
         // Submit on Enter (without shift)
         tx.addEventListener('keydown', function(e) {
