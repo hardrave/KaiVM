@@ -303,7 +303,14 @@ def run_capture_loop(
     while True:
         if not Path(reader.device).exists():
             log.warning("Device %s not found. Waiting...", reader.device)
-            time.sleep(5.0)
+            # Force directory listing to refresh cache
+            try:
+                available = sorted([str(p) for p in Path(reader.device).parent.glob("video*")])
+                log.info("Available video devices: %s", available)
+                os.listdir(Path(reader.device).parent)
+            except Exception:
+                pass
+            time.sleep(1.0)
             continue
 
         try:
