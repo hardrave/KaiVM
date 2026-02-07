@@ -133,3 +133,27 @@ class GeminiPlanner:
 
         raise ValueError("Gemini failed to produce valid JSON after retries")
 
+    def ask(
+        self,
+        instruction: str,
+        jpeg_bytes: bytes,
+    ) -> str:
+        """
+        Simple Q&A about the screen.
+        """
+        # We might want to resize just to be safe/fast
+        jpeg_bytes_processed, _, _ = process_image(jpeg_bytes, max_dim=2048)
+        
+        parts = [
+            types.Part.from_bytes(data=jpeg_bytes_processed, mime_type="image/jpeg"),
+            instruction
+        ]
+        
+        client = self._client()
+        
+        resp = client.models.generate_content(
+            model=self.model,
+            contents=parts,
+        )
+        return resp.text or ""
+

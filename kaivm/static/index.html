@@ -415,9 +415,14 @@
                     <span>⚡ Danger</span>
                 </label>
                 
-                <label class="toggle-pill" title="Simulate actions without executing">
+                <label class="toggle-pill" title="Simulate actions without executing" id="dryRunLabel">
                     <input type="checkbox" id="dryRun">
                     <span>🧪 Dry Run</span>
+                </label>
+                
+                <label class="toggle-pill" title="Attach screenshot to the request" id="attachScreenLabel" style="display:none">
+                    <input type="checkbox" id="attachScreen" checked>
+                    <span>📷 Attach Screen</span>
                 </label>
             </div>
 
@@ -429,7 +434,7 @@
                     <button class="btn-circle btn-stop" onclick="stopAgent()" title="Stop Agent" id="stopBtn" style="display:none">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
                     </button>
-                    <button class="btn-circle btn-run" onclick="runAgent()" title="Run Agent" id="runBtn">
+                    <button class="btn-circle btn-run" onclick="handleRun()" title="Run / Ask" id="runBtn">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
                     </button>
                 </div>
@@ -451,7 +456,7 @@
             </div>
 
             <div class="card thinking-card">
-                <h4>Agent Thinking</h4>
+                <h4 id="thinkingHeader">Agent Thinking</h4>
                 <div class="status-box" id="logs"></div>
             </div>
 
@@ -538,10 +543,15 @@
         tx.addEventListener('keydown', function(e) {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                runAgent();
+                handleRun();
             }
         });
     });
+
+    function handleRun() {
+        if (mode === 'manual') askAgent();
+        else runAgent();
+    }
 
     function saveSettings() {
         localStorage.setItem('kaivm_api_key', document.getElementById('apiKey').value);
@@ -572,26 +582,82 @@
     function setMode(m) {
         mode = m;
         const stream = document.getElementById('stream');
-        const inputs = document.querySelectorAll('#instruction, #modelSelect, #runBtn, #stopBtn, .toggle-pill input');
+        
+        // Default state: Enable everything, hide specific buttons
+        const allInputs = document.querySelectorAll('#instruction, #modelSelect, .toggle-pill input');
+        allInputs.forEach(el => el.disabled = false);
+        
+        document.getElementById('runBtn').style.display = 'flex';
+        document.getElementById('stopBtn').style.display = 'none'; 
+        
+        // Reset Headers/Pills
+        document.getElementById('thinkingHeader').innerText = "Agent Thinking";
+        document.getElementById('allowDanger').parentElement.style.display = 'flex';
+        document.getElementById('dryRunLabel').style.display = 'flex';
+        document.getElementById('attachScreenLabel').style.display = 'none';
         
         if (mode === 'manual') {
-            inputs.forEach(el => el.disabled = true);
             document.getElementById('statusIndicator').innerText = "Status: Manual Mode";
             document.getElementById('statusIndicator').style.borderLeftColor = 'var(--success)';
+            
+            // Manual: Disable agent toggles, Enable instruction/model
+            // HIDE danger/dry run, SHOW attach screen
+            document.getElementById('allowDanger').parentElement.style.display = 'none';
+            document.getElementById('dryRunLabel').style.display = 'none';
+            document.getElementById('attachScreenLabel').style.display = 'flex';
+            
+            document.getElementById('thinkingHeader').innerText = "Agent Answer";
+            
+            // Ensure Run button is VISIBLE for manual mode "Ask"
+            document.getElementById('runBtn').style.display = 'flex';
+            
             connectWS();
             stream.onclick = () => stream.requestPointerLock();
         } else if (mode === 'calibration') {
-             inputs.forEach(el => el.disabled = true);
+             // Disable all inputs
+             allInputs.forEach(el => el.disabled = true);
+             document.getElementById('runBtn').disabled = true;
+             
              document.getElementById('statusIndicator').innerText = "Status: Calibrating...";
              if (document.exitPointerLock) document.exitPointerLock();
              stream.onclick = handleCalibrationClick;
         } else {
-            inputs.forEach(el => el.disabled = false);
+            // Agent mode
             document.getElementById('statusIndicator').innerText = "Status: Idle";
             document.getElementById('statusIndicator').style.borderLeftColor = 'var(--accent)';
             if (document.exitPointerLock) document.exitPointerLock();
             stream.onclick = function() { this.src = '/stream?' + new Date().getTime(); };
             if (ws) { ws.close(); ws = null; }
+        }
+    }
+    
+    async function askAgent() {
+        const instruction = document.getElementById('instruction').value;
+        if (!instruction.trim()) return;
+        
+        const btn = document.getElementById('runBtn');
+        const originalOpacity = btn.style.opacity;
+        btn.disabled = true;
+        btn.style.opacity = 0.5;
+        
+        try {
+            await fetch('/api/ask', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    instruction,
+                    model: document.getElementById('modelSelect').value,
+                    api_key: document.getElementById('apiKey').value,
+                    attach_screen: document.getElementById('attachScreen').checked
+                })
+            });
+            pollState();
+        } catch (e) {
+            console.error(e);
+            alert("Error: " + e);
+        } finally {
+            btn.disabled = false;
+            btn.style.opacity = originalOpacity || 1;
         }
     }
     
@@ -703,6 +769,13 @@
     function updateRunState(running) {
         const runBtn = document.getElementById('runBtn');
         const stopBtn = document.getElementById('stopBtn');
+        
+        if (mode === 'manual') {
+            runBtn.style.display = 'flex';
+            stopBtn.style.display = 'none';
+            return;
+        }
+
         if (running) {
             runBtn.style.display = 'none';
             stopBtn.style.display = 'flex';

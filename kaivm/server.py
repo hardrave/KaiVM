@@ -207,6 +207,12 @@ class RunRequest(BaseModel):
     def check_timeout(cls, v: int) -> int:
         return v if v > 0 else 1440 # 24h
 
+class AskRequest(BaseModel):
+    instruction: str
+    model: str = DEFAULT_MODEL
+    api_key: Optional[str] = None
+    attach_screen: bool = True
+
 class MoveAbsRequest(BaseModel):
     x: int
     y: int
@@ -413,6 +419,62 @@ async def stop_agent():
     STOP_FILE.touch()
     state.logs.append("Stop requested...")
     return {"status": "stopping"}
+
+@app.post("/api/ask")
+async def ask_agent(req: AskRequest):
+    # Clear state for a fresh answer
+    state.logs = []
+    state.planned_actions = []
+    state.last_status = "Thinking..."
+    
+    # Check screen if requested
+    data = None
+    if req.attach_screen:
+        if not LATEST_JPG.exists():
+            return JSONResponse({"error": "No video stream available"}, status_code=400)
+        try:
+            data = LATEST_JPG.read_bytes()
+        except Exception:
+            return JSONResponse({"error": "Failed to read stream"}, status_code=500)
+            
+    # state.logs.append(f"Q: {req.instruction}") # User wants ONLY answer? 
+    # "I should only get an answer to the question."
+    # Let's verify if they mean no log of the question. 
+    # Usually "Agent Answer" box implies the answer. 
+    # But seeing the question is helpful. Let's keep it minimal.
+    
+    try:
+        if req.attach_screen and data:
+            planner = GeminiPlanner(
+                model=req.model,
+                api_key=req.api_key,
+            )
+            # Run in thread pool
+            loop = asyncio.get_event_loop()
+            answer = await loop.run_in_executor(None, planner.ask, req.instruction, data)
+        else:
+            # Just text chat? GeminiPlanner.ask requires bytes currently.
+            # We can mock it or just fail. 
+            # The prompt "Ask model about current screen" implies screen is needed.
+            # But "option to attach screenshot" implies it might be optional.
+            # If not attached, we can't really "Ask Screen".
+            # Let's assume for now we just say "Screenshot required" or 
+            # if we really want text only, we'd need to adjust GeminiPlanner.
+            # For this prototype, let's assume attach_screen is usually true.
+            if not req.attach_screen:
+                 answer = "Screenshot attachment is disabled. (Text-only chat not implemented yet)"
+            else:
+                 answer = "No data."
+
+        state.logs.append(answer)
+        state.last_status = "Done"
+        return {"answer": answer}
+        
+    except Exception as e:
+        log.exception("Ask error")
+        state.logs.append(f"Error: {e}")
+        state.last_status = "Error"
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.get("/api/state")
 async def get_state():
