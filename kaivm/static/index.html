@@ -508,6 +508,14 @@
                     <textarea id="evtAction" class="form-input" rows="3" placeholder="e.g. Click the 'Close' button"></textarea>
                 </div>
                 <div class="form-col">
+                    <label>Model</label>
+                    <select id="evtModel" class="form-input">
+                        <option value="gemini-3-flash-preview" selected>Gemini 3 Flash</option>
+                        <option value="gemini-3-pro-preview">Gemini 3 Pro</option>
+                        <option value="gemini-2.0-flash-thinking-exp-01-21">Gemini 2.0 Flash Thinking</option>
+                    </select>
+                </div>
+                <div class="form-col">
                     <label>Check Interval (sec)</label>
                     <input type="number" id="evtInterval" class="form-input" value="60">
                 </div>
@@ -613,16 +621,18 @@
 
     function toggleSettings() {
         const settings = document.getElementById('settingsPanel');
-        const main = document.getElementById('rightPanelContent');
         const calib = document.getElementById('calibrationPanel');
         
         if (settings.style.display !== 'none' || calib.style.display !== 'none') {
+            // Closing settings/calibration - Restore view based on mode
             settings.style.display = 'none';
             calib.style.display = 'none';
-            main.style.display = 'flex';
+            setMode(mode);
         } else {
-            main.style.display = 'none';
-            calib.style.display = 'none';
+            // Opening settings - Hide everything else
+            document.getElementById('rightPanelContent').style.display = 'none';
+            document.getElementById('eventsPanel').style.display = 'none';
+            document.getElementById('calibrationPanel').style.display = 'none';
             settings.style.display = 'flex';
         }
     }
@@ -688,6 +698,8 @@
              // Disable Agent inputs in events mode
              document.getElementById('instruction').disabled = true;
              document.getElementById('runBtn').disabled = true;
+             document.getElementById('modelSelect').disabled = true;
+             document.querySelectorAll('.toggle-pill input').forEach(el => el.disabled = true);
              
              if (document.exitPointerLock) document.exitPointerLock();
              stream.onclick = function() { this.src = '/stream?' + new Date().getTime(); };
@@ -707,45 +719,72 @@
     
     // EVENTS LOGIC
     async function loadEvents() {
+        // "Same manner as API key" -> LocalStorage is truth.
+        // On load, we take from LocalStorage and push to Server (restore).
+        // But if LocalStorage is empty, we check Server (maybe user cleared cache but server is running).
+        
         try {
-            const res = await fetch('/api/events');
-            const events = await res.json();
-            const list = document.getElementById('eventsList');
-            list.innerHTML = '';
+            const localEventsStr = localStorage.getItem('kaivm_events');
+            let events = localEventsStr ? JSON.parse(localEventsStr) : [];
             
-            if (events.length === 0) {
-                list.innerHTML = '<div style="color:var(--text-muted); font-size:0.85rem; padding:8px; text-align:center;">No events defined.</div>';
-                return;
+            // If we have local events, sync them to server
+            if (events.length > 0) {
+                 await fetch('/api/events/sync', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({events: events})
+                });
+            } else {
+                // No local events, try fetching from server
+                const res = await fetch('/api/events');
+                const serverEvents = await res.json();
+                if (serverEvents.length > 0) {
+                    events = serverEvents;
+                    localStorage.setItem('kaivm_events', JSON.stringify(events));
+                }
             }
-            
-            events.forEach(evt => {
-                const div = document.createElement('div');
-                div.style.padding = '8px';
-                div.style.borderBottom = '1px solid var(--border)';
-                div.style.display = 'flex';
-                div.style.justifyContent = 'space-between';
-                div.style.alignItems = 'center';
-                
-                const info = document.createElement('div');
-                info.innerHTML = `<div style="font-weight:600; font-size:0.9rem;">${evt.name}</div>
-                                  <div style="font-size:0.75rem; color:var(--text-muted);">${evt.interval}s interval</div>`;
-                
-                const delBtn = document.createElement('button');
-                delBtn.innerText = '×';
-                delBtn.style.background = 'transparent';
-                delBtn.style.border = 'none';
-                delBtn.style.color = 'var(--text-muted)';
-                delBtn.style.fontSize = '1.2rem';
-                delBtn.style.cursor = 'pointer';
-                delBtn.onclick = () => deleteEvent(evt.id);
-                
-                div.appendChild(info);
-                div.appendChild(delBtn);
-                list.appendChild(div);
-            });
+
+            renderEventsList(events);
+
         } catch (e) {
             console.error("Failed to load events", e);
         }
+    }
+    
+    function renderEventsList(events) {
+        const list = document.getElementById('eventsList');
+        list.innerHTML = '';
+        
+        if (events.length === 0) {
+            list.innerHTML = '<div style="color:var(--text-muted); font-size:0.85rem; padding:8px; text-align:center;">No events defined.</div>';
+            return;
+        }
+        
+        events.forEach(evt => {
+            const div = document.createElement('div');
+            div.style.padding = '8px';
+            div.style.borderBottom = '1px solid var(--border)';
+            div.style.display = 'flex';
+            div.style.justifyContent = 'space-between';
+            div.style.alignItems = 'center';
+            
+            const info = document.createElement('div');
+            info.innerHTML = `<div style="font-weight:600; font-size:0.9rem;">${evt.name}</div>
+                              <div style="font-size:0.75rem; color:var(--text-muted);">${evt.model || 'Default'} • ${evt.interval}s interval</div>`;
+            
+            const delBtn = document.createElement('button');
+            delBtn.innerText = '×';
+            delBtn.style.background = 'transparent';
+            delBtn.style.border = 'none';
+            delBtn.style.color = 'var(--text-muted)';
+            delBtn.style.fontSize = '1.2rem';
+            delBtn.style.cursor = 'pointer';
+            delBtn.onclick = () => deleteEvent(evt.id);
+            
+            div.appendChild(info);
+            div.appendChild(delBtn);
+            list.appendChild(div);
+        });
     }
     
     function showEventModal() {
@@ -760,16 +799,25 @@
         const name = document.getElementById('evtName').value;
         const condition = document.getElementById('evtCondition').value;
         const action = document.getElementById('evtAction').value;
+        const model = document.getElementById('evtModel').value;
         const interval = parseInt(document.getElementById('evtInterval').value);
         
         if (!name || !condition || !action) return alert("Please fill all fields");
         
         try {
-            await fetch('/api/events', {
+            const res = await fetch('/api/events', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({name, condition, action, interval})
+                body: JSON.stringify({name, condition, action, model, interval})
             });
+            const newEvent = await res.json();
+            
+            // Save to LocalStorage
+            const localEventsStr = localStorage.getItem('kaivm_events');
+            const events = localEventsStr ? JSON.parse(localEventsStr) : [];
+            events.push(newEvent);
+            localStorage.setItem('kaivm_events', JSON.stringify(events));
+            
             closeEventModal();
             loadEvents();
         } catch (e) { alert("Error saving event: " + e); }
@@ -779,6 +827,15 @@
         if (!confirm("Delete this event?")) return;
         try {
             await fetch('/api/events/' + id, { method: 'DELETE' });
+            
+            // Remove from LocalStorage
+            const localEventsStr = localStorage.getItem('kaivm_events');
+            if (localEventsStr) {
+                let events = JSON.parse(localEventsStr);
+                events = events.filter(e => e.id !== id);
+                localStorage.setItem('kaivm_events', JSON.stringify(events));
+            }
+            
             loadEvents();
         } catch (e) { alert("Error deleting: " + e); }
     }
@@ -789,7 +846,16 @@
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    api_key: document.getElementById('apiKey').value
+                    api_key: document.getElementById('apiKey').value,
+                    max_steps: parseInt(document.getElementById('maxSteps').value) || 10,
+                    timeout: (parseInt(document.getElementById('timeout').value) || 120) * 60 // Convert min to sec? No, server expects int. 
+                    // Wait, RunRequest expects timeout in MINUTES. Event config usually uses seconds?
+                    // Let's check AgentConfig usage in server.py.
+                    // In _agent_runner_thread: overall_timeout_s=req.timeout * 60.0
+                    // In EventsManager._execute_action (OLD): overall_timeout_s=120 (seconds)
+                    // In StartEventsRequest: timeout: int = 120 (defaults to seconds likely if following old pattern)
+                    // But UI 'timeout' input says "(min)".
+                    // So we should convert minutes to seconds here.
                 })
             });
             pollState();
@@ -1067,7 +1133,7 @@
                 btnStart.style.display = 'block';
                 btnStop.style.display = 'none';
                 
-                if (mode === 'events') disableInputsForEvents(false); 
+                if (mode === 'agent' || mode === 'manual') disableInputsForEvents(false); 
             }
             
             if (data.running || data.events_running) {

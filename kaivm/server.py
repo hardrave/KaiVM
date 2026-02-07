@@ -27,6 +27,7 @@ class Event(BaseModel):
     name: str
     condition: str
     action: str
+    model: str = DEFAULT_MODEL
     interval: int = 60
     enabled: bool = True
     last_check: float = 0.0
@@ -35,10 +36,16 @@ class EventCreate(BaseModel):
     name: str
     condition: str
     action: str
+    model: str = DEFAULT_MODEL
     interval: int = 60
 
 class StartEventsRequest(BaseModel):
     api_key: Optional[str] = None
+    max_steps: int = 10
+    timeout: int = 120
+
+class SyncEventsRequest(BaseModel):
+    events: List[Event]
 
 class EventsManager:
     def __init__(self):
@@ -47,6 +54,8 @@ class EventsManager:
         self.task: Optional[asyncio.Task] = None
         self.logs: List[str] = []
         self.api_key: Optional[str] = None
+        self.max_steps: int = 10
+        self.timeout: int = 120
 
     def add_event(self, evt: EventCreate) -> Event:
         new_event = Event(
@@ -54,6 +63,7 @@ class EventsManager:
             name=evt.name,
             condition=evt.condition,
             action=evt.action,
+            model=evt.model,
             interval=evt.interval,
             enabled=True,
             last_check=0.0
@@ -67,17 +77,23 @@ class EventsManager:
             del self.events[event_id]
             self.log(f"Event removed: {event_id}")
 
+    def sync_events(self, events: List[Event]):
+        self.events = {e.id: e for e in events}
+        self.log(f"Events synced: {len(events)} events loaded.")
+
     def log(self, msg: str):
         ts = time.strftime("%H:%M:%S")
         self.logs.append(f"[{ts}] {msg}")
         if len(self.logs) > 100:
             self.logs.pop(0)
 
-    async def start_loop(self, api_key: Optional[str] = None):
+    async def start_loop(self, api_key: Optional[str] = None, max_steps: int = 10, timeout: int = 120):
         if self.running: return
         self.running = True
         self.api_key = api_key
-        self.log("Events mode started.")
+        self.max_steps = max_steps
+        self.timeout = timeout
+        self.log(f"Events mode started (Steps={self.max_steps}, Timeout={self.timeout}s).")
         self.task = asyncio.create_task(self._loop())
 
     async def stop_loop(self):
@@ -91,7 +107,9 @@ class EventsManager:
         self.log("Events mode stopped.")
 
     async def _loop(self):
-        planner = GeminiPlanner(model=DEFAULT_MODEL, api_key=self.api_key)
+        # We'll instantiate planners as needed or reuse them?
+        # For simplicity, let's instantiate per check for now, or per loop iteration if we want to support dynamic models.
+        # Actually, if we want to support switching models per event, we should instantiate inside.
         
         while self.running:
             now = time.time()
@@ -111,6 +129,9 @@ class EventsManager:
                             
                         jpeg = LATEST_JPG.read_bytes()
                         
+                        # Use event-specific model
+                        planner = GeminiPlanner(model=event.model, api_key=self.api_key)
+                        
                         # Check condition
                         res = await asyncio.to_thread(planner.check_condition, event.condition, jpeg)
                         
@@ -119,13 +140,7 @@ class EventsManager:
                             self.log(f"Reasoning: {res.get('reasoning')}")
                             
                             # Execute Action
-                            # We spawn a temporary agent run. 
-                            # WARNING: This blocks the event loop for the duration of the action if not careful.
-                            # But since we are in async loop, we should await it or spawn it.
-                            # However, we don't want multiple actions colliding.
-                            # So we await it.
-                            
-                            await self._execute_action(event.action)
+                            await self._execute_action(event.action, event.model)
                             
                         else:
                             self.log(f"Event {event.name} not met. ({res.get('reasoning')})")
@@ -136,7 +151,7 @@ class EventsManager:
             
             await asyncio.sleep(1)
 
-    async def _execute_action(self, instruction: str):
+    async def _execute_action(self, instruction: str, model_name: str = DEFAULT_MODEL):
         self.log(f"Executing action: {instruction}")
         
         # We reuse the agent runner logic but we need to run it here.
@@ -154,15 +169,15 @@ class EventsManager:
                         cal_x_s, cal_y_s, cal_x_o, cal_y_o = parts
                 except: pass
 
-            planner = GeminiPlanner(model=DEFAULT_MODEL, timeout_steps=2, api_key=self.api_key)
+            planner = GeminiPlanner(model=model_name, timeout_steps=2, api_key=self.api_key)
             agent = KaiVMAgent(
                 planner=planner,
                 kbd=KeyboardHID(),
                 mouse=MouseHID(),
                 abs_mouse=AbsoluteMouseHID(),
                 cfg=AgentConfig(
-                    max_steps=10, # Short run for event action
-                    overall_timeout_s=120,
+                    max_steps=self.max_steps,
+                    overall_timeout_s=self.timeout,
                     allow_danger=True, # Actions might need danger
                     cal_x_scale=cal_x_s, cal_y_scale=cal_y_s, 
                     cal_x_offset=cal_x_o, cal_y_offset=cal_y_o,
@@ -647,11 +662,16 @@ async def delete_event(event_id: str):
     state.events.remove_event(event_id)
     return {"status": "deleted"}
 
+@app.post("/api/events/sync")
+async def sync_events(req: SyncEventsRequest):
+    state.events.sync_events(req.events)
+    return {"status": "synced", "count": len(req.events)}
+
 @app.post("/api/events/start")
 async def start_events(req: StartEventsRequest):
     if state.agent_running:
          return JSONResponse({"error": "Agent is running. Stop it first."}, status_code=400)
-    await state.events.start_loop(api_key=req.api_key)
+    await state.events.start_loop(api_key=req.api_key, max_steps=req.max_steps, timeout=req.timeout)
     return {"status": "started"}
 
 @app.post("/api/events/stop")
