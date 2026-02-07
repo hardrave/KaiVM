@@ -44,6 +44,16 @@ class StartEventsRequest(BaseModel):
     max_steps: int = 10
     timeout: int = 120
 
+    @field_validator('max_steps')
+    @classmethod
+    def check_max_steps(cls, v: int) -> int:
+        return v if v > 0 else 10000
+
+    @field_validator('timeout')
+    @classmethod
+    def check_timeout(cls, v: int) -> int:
+        return v if v > 0 else 604800 # 7 days
+
 class SyncEventsRequest(BaseModel):
     events: List[Event]
 
@@ -378,7 +388,7 @@ class RunRequest(BaseModel):
     @field_validator('timeout')
     @classmethod
     def check_timeout(cls, v: int) -> int:
-        return v if v > 0 else 1440 # 24h
+        return v if v > 0 else 10080 # 7 days
 
 class AskRequest(BaseModel):
     instruction: str
