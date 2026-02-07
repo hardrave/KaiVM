@@ -5,6 +5,7 @@ import logging
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+import uuid
 from typing import Optional, List, Dict, Any, Set
 
 from fastapi import FastAPI, WebSocket, Request, BackgroundTasks, WebSocketDisconnect
@@ -21,6 +22,162 @@ from kaivm.util.paths import LATEST_JPG, STOP_FILE, CALIBRATION_FILE
 
 log = get_logger("kaivm.server")
 
+class Event(BaseModel):
+    id: str
+    name: str
+    condition: str
+    action: str
+    interval: int = 60
+    enabled: bool = True
+    last_check: float = 0.0
+
+class EventCreate(BaseModel):
+    name: str
+    condition: str
+    action: str
+    interval: int = 60
+
+class StartEventsRequest(BaseModel):
+    api_key: Optional[str] = None
+
+class EventsManager:
+    def __init__(self):
+        self.events: Dict[str, Event] = {}
+        self.running: bool = False
+        self.task: Optional[asyncio.Task] = None
+        self.logs: List[str] = []
+        self.api_key: Optional[str] = None
+
+    def add_event(self, evt: EventCreate) -> Event:
+        new_event = Event(
+            id=str(uuid.uuid4()),
+            name=evt.name,
+            condition=evt.condition,
+            action=evt.action,
+            interval=evt.interval,
+            enabled=True,
+            last_check=0.0
+        )
+        self.events[new_event.id] = new_event
+        self.log(f"Event added: {new_event.name}")
+        return new_event
+
+    def remove_event(self, event_id: str):
+        if event_id in self.events:
+            del self.events[event_id]
+            self.log(f"Event removed: {event_id}")
+
+    def log(self, msg: str):
+        ts = time.strftime("%H:%M:%S")
+        self.logs.append(f"[{ts}] {msg}")
+        if len(self.logs) > 100:
+            self.logs.pop(0)
+
+    async def start_loop(self, api_key: Optional[str] = None):
+        if self.running: return
+        self.running = True
+        self.api_key = api_key
+        self.log("Events mode started.")
+        self.task = asyncio.create_task(self._loop())
+
+    async def stop_loop(self):
+        self.running = False
+        if self.task:
+            self.task.cancel()
+            try:
+                await self.task
+            except asyncio.CancelledError:
+                pass
+        self.log("Events mode stopped.")
+
+    async def _loop(self):
+        planner = GeminiPlanner(model=DEFAULT_MODEL, api_key=self.api_key)
+        
+        while self.running:
+            now = time.time()
+            active_events = [e for e in self.events.values() if e.enabled]
+            
+            for event in active_events:
+                if not self.running: break
+                
+                if now - event.last_check >= event.interval:
+                    event.last_check = now
+                    try:
+                        self.log(f"Checking event: {event.name}")
+                        
+                        if not LATEST_JPG.exists():
+                            self.log("Skipping check: No video stream.")
+                            continue
+                            
+                        jpeg = LATEST_JPG.read_bytes()
+                        
+                        # Check condition
+                        res = await asyncio.to_thread(planner.check_condition, event.condition, jpeg)
+                        
+                        if res.get("met"):
+                            self.log(f"EVENT TRIGGERED: {event.name}")
+                            self.log(f"Reasoning: {res.get('reasoning')}")
+                            
+                            # Execute Action
+                            # We spawn a temporary agent run. 
+                            # WARNING: This blocks the event loop for the duration of the action if not careful.
+                            # But since we are in async loop, we should await it or spawn it.
+                            # However, we don't want multiple actions colliding.
+                            # So we await it.
+                            
+                            await self._execute_action(event.action)
+                            
+                        else:
+                            self.log(f"Event {event.name} not met. ({res.get('reasoning')})")
+                            
+                    except Exception as e:
+                        log.error(f"Event loop error: {e}")
+                        self.log(f"Error checking {event.name}: {e}")
+            
+            await asyncio.sleep(1)
+
+    async def _execute_action(self, instruction: str):
+        self.log(f"Executing action: {instruction}")
+        
+        # We reuse the agent runner logic but we need to run it here.
+        # We can't reuse _agent_runner_thread easily because it modifies global state.
+        # We should probably adapt it.
+        # For now, let's just run a short agent task.
+        
+        try:
+             # Load calibration if available
+            cal_x_s, cal_y_s, cal_x_o, cal_y_o = 1.0, 1.0, 0.0, 0.0
+            if state.mouse_calibration:
+                try:
+                    parts = [float(x.strip()) for x in state.mouse_calibration.split(",")]
+                    if len(parts) == 4:
+                        cal_x_s, cal_y_s, cal_x_o, cal_y_o = parts
+                except: pass
+
+            planner = GeminiPlanner(model=DEFAULT_MODEL, timeout_steps=2, api_key=self.api_key)
+            agent = KaiVMAgent(
+                planner=planner,
+                kbd=KeyboardHID(),
+                mouse=MouseHID(),
+                abs_mouse=AbsoluteMouseHID(),
+                cfg=AgentConfig(
+                    max_steps=10, # Short run for event action
+                    overall_timeout_s=120,
+                    allow_danger=True, # Actions might need danger
+                    cal_x_scale=cal_x_s, cal_y_scale=cal_y_s, 
+                    cal_x_offset=cal_x_o, cal_y_offset=cal_y_o,
+                ),
+            )
+            
+            # Run in thread to avoid blocking main loop completely (though strictly we are already in threadpool usually?)
+            # No, we are in asyncio loop. agent.run is synchronous/blocking.
+            # So we MUST run in thread.
+            res = await asyncio.to_thread(agent.run, instruction)
+            self.log(f"Action finished: {res}")
+            
+        except Exception as e:
+            self.log(f"Action failed: {e}")
+
 # Global state
 class AppState:
     agent_running: bool = False
@@ -30,6 +187,7 @@ class AppState:
     last_status: str = "Idle"
     planned_actions: List[Dict[str, Any]] = []
     mouse_calibration: Optional[str] = None
+    events: EventsManager = EventsManager()
 
 state = AppState()
 
@@ -476,13 +634,46 @@ async def ask_agent(req: AskRequest):
         state.last_status = "Error"
         return JSONResponse({"error": str(e)}, status_code=500)
 
+@app.get("/api/events")
+async def list_events():
+    return list(state.events.events.values())
+
+@app.post("/api/events")
+async def create_event(evt: EventCreate):
+    return state.events.add_event(evt)
+
+@app.delete("/api/events/{event_id}")
+async def delete_event(event_id: str):
+    state.events.remove_event(event_id)
+    return {"status": "deleted"}
+
+@app.post("/api/events/start")
+async def start_events(req: StartEventsRequest):
+    if state.agent_running:
+         return JSONResponse({"error": "Agent is running. Stop it first."}, status_code=400)
+    await state.events.start_loop(api_key=req.api_key)
+    return {"status": "started"}
+
+@app.post("/api/events/stop")
+async def stop_events():
+    await state.events.stop_loop()
+    return {"status": "stopped"}
+
 @app.get("/api/state")
 async def get_state():
+    logs = state.logs
+    # If events mode is active, prefer showing event logs in the main window
+    # or we can have the frontend decide.
+    # The user asked for "Agent Reasoning" in events mode.
+    if state.events.running:
+        logs = state.events.logs
+
     return {
         "running": state.agent_running,
+        "events_running": state.events.running,
         "instruction": state.current_instruction,
         "status": state.last_status,
-        "logs": state.logs[-50:], # Last 50 logs
+        "logs": logs[-50:], # Last 50 logs
         "planned_actions": state.planned_actions
     }
 

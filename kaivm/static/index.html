@@ -445,15 +445,17 @@
     <!-- RIGHT: Status/Mode/Logs -->
     <div class="right-column">
         
+        <div class="card" style="flex-shrink: 0;">
+            <div class="mode-switch">
+                <label><input type="radio" name="mode" value="agent" checked onchange="setMode('agent')"> Agent</label>
+                <label><input type="radio" name="mode" value="manual" onchange="setMode('manual')"> Manual</label>
+                <label><input type="radio" name="mode" value="events" onchange="setMode('events')"> Events</label>
+            </div>
+            <div id="statusIndicator">Status: Idle</div>
+        </div>
+        
         <!-- Standard Right Panel Content -->
         <div id="rightPanelContent" class="flex-scroll-container">
-            <div class="card" style="flex-shrink: 0;">
-                <div class="mode-switch">
-                    <label><input type="radio" name="mode" value="agent" checked onchange="setMode('agent')"> Agent</label>
-                    <label><input type="radio" name="mode" value="manual" onchange="setMode('manual')"> Manual</label>
-                </div>
-                <div id="statusIndicator">Status: Idle</div>
-            </div>
 
             <div class="card thinking-card">
                 <h4 id="thinkingHeader">Agent Thinking</h4>
@@ -464,6 +466,56 @@
                 <h4>Planned Actions</h4>
                 <div id="planList"></div>
             </div>
+        </div>
+
+        <!-- Events Panel -->
+        <div class="card" id="eventsPanel" style="display:none; flex: 1; border-color: var(--accent); overflow: hidden;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h3>Events Monitor</h3>
+                <div id="eventsStatus" style="font-size:0.8rem; color:var(--text-muted);">Stopped</div>
+            </div>
+
+            <div style="display:flex; gap:8px; margin-bottom:16px;">
+                 <button onclick="startEvents()" class="btn-secondary" id="btnStartEvents" style="color:var(--success); border-color:var(--success);">Start Monitor</button>
+                 <button onclick="stopEvents()" class="btn-secondary" id="btnStopEvents" style="color:var(--danger); border-color:var(--danger); display:none;">Stop Monitor</button>
+            </div>
+
+            <h4 style="margin: 0 0 8px 0;">Defined Events</h4>
+            <div style="flex:1; overflow-y:auto; margin-bottom:16px; border:1px solid var(--border); border-radius:8px; padding:8px; min-height: 100px;" id="eventsList">
+                <!-- Event items -->
+            </div>
+
+            <button onclick="showEventModal()" class="btn-secondary" style="margin-bottom:16px;">+ Add Event</button>
+
+            <h4 style="margin:0 0 8px 0;">Event Logs</h4>
+            <div class="status-box" id="eventLogs" style="flex:1; min-height: 100px;"></div>
+        </div>
+
+        <!-- Event Modal -->
+        <div id="eventModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.8); z-index:100; align-items:center; justify-content:center;">
+             <div class="card" style="width:400px; max-width:90%;">
+                <h3 style="font-size: 1.1rem; color: var(--text);">New Event</h3>
+                <div class="form-col">
+                    <label>Name</label>
+                    <input type="text" id="evtName" class="form-input" placeholder="e.g. Popup Watcher">
+                </div>
+                <div class="form-col">
+                    <label>Condition (Visual Description)</label>
+                    <textarea id="evtCondition" class="form-input" rows="3" placeholder="e.g. A red popup saying 'Error' appears"></textarea>
+                </div>
+                <div class="form-col">
+                    <label>Action (Instruction)</label>
+                    <textarea id="evtAction" class="form-input" rows="3" placeholder="e.g. Click the 'Close' button"></textarea>
+                </div>
+                <div class="form-col">
+                    <label>Check Interval (sec)</label>
+                    <input type="number" id="evtInterval" class="form-input" value="60">
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button onclick="saveEvent()" class="btn-secondary" style="background:var(--accent); color:white; border:none;">Save</button>
+                    <button onclick="closeEventModal()" class="btn-secondary">Cancel</button>
+                </div>
+             </div>
         </div>
 
         <!-- Settings Panel -->
@@ -582,6 +634,16 @@
     function setMode(m) {
         mode = m;
         const stream = document.getElementById('stream');
+        const eventsPanel = document.getElementById('eventsPanel');
+        const mainPanel = document.getElementById('rightPanelContent');
+        const calibPanel = document.getElementById('calibrationPanel');
+        const settingsPanel = document.getElementById('settingsPanel');
+        
+        // Hide all right panels first
+        eventsPanel.style.display = 'none';
+        mainPanel.style.display = 'none';
+        calibPanel.style.display = 'none';
+        settingsPanel.style.display = 'none';
         
         // Default state: Enable everything, hide specific buttons
         const allInputs = document.querySelectorAll('#instruction, #modelSelect, .toggle-pill input');
@@ -589,6 +651,7 @@
         
         document.getElementById('runBtn').style.display = 'flex';
         document.getElementById('stopBtn').style.display = 'none'; 
+        document.getElementById('runBtn').disabled = false;
         
         // Reset Headers/Pills
         document.getElementById('thinkingHeader').innerText = "Agent Thinking";
@@ -597,32 +660,41 @@
         document.getElementById('attachScreenLabel').style.display = 'none';
         
         if (mode === 'manual') {
+            mainPanel.style.display = 'flex';
             document.getElementById('statusIndicator').innerText = "Status: Manual Mode";
             document.getElementById('statusIndicator').style.borderLeftColor = 'var(--success)';
             
-            // Manual: Disable agent toggles, Enable instruction/model
-            // HIDE danger/dry run, SHOW attach screen
             document.getElementById('allowDanger').parentElement.style.display = 'none';
             document.getElementById('dryRunLabel').style.display = 'none';
             document.getElementById('attachScreenLabel').style.display = 'flex';
-            
             document.getElementById('thinkingHeader').innerText = "Agent Answer";
-            
-            // Ensure Run button is VISIBLE for manual mode "Ask"
             document.getElementById('runBtn').style.display = 'flex';
             
             connectWS();
             stream.onclick = () => stream.requestPointerLock();
         } else if (mode === 'calibration') {
-             // Disable all inputs
+             calibPanel.style.display = 'flex';
              allInputs.forEach(el => el.disabled = true);
              document.getElementById('runBtn').disabled = true;
              
              document.getElementById('statusIndicator').innerText = "Status: Calibrating...";
              if (document.exitPointerLock) document.exitPointerLock();
              stream.onclick = handleCalibrationClick;
+        } else if (mode === 'events') {
+             eventsPanel.style.display = 'flex';
+             document.getElementById('statusIndicator').innerText = "Status: Events Mode";
+             document.getElementById('statusIndicator').style.borderLeftColor = '#f59e0b';
+             
+             // Disable Agent inputs in events mode
+             document.getElementById('instruction').disabled = true;
+             document.getElementById('runBtn').disabled = true;
+             
+             if (document.exitPointerLock) document.exitPointerLock();
+             stream.onclick = function() { this.src = '/stream?' + new Date().getTime(); };
+             loadEvents();
         } else {
             // Agent mode
+            mainPanel.style.display = 'flex';
             document.getElementById('statusIndicator').innerText = "Status: Idle";
             document.getElementById('statusIndicator').style.borderLeftColor = 'var(--accent)';
             if (document.exitPointerLock) document.exitPointerLock();
@@ -631,6 +703,118 @@
         }
     }
     
+    // ... (rest of functions) ...
+    
+    // EVENTS LOGIC
+    async function loadEvents() {
+        try {
+            const res = await fetch('/api/events');
+            const events = await res.json();
+            const list = document.getElementById('eventsList');
+            list.innerHTML = '';
+            
+            if (events.length === 0) {
+                list.innerHTML = '<div style="color:var(--text-muted); font-size:0.85rem; padding:8px; text-align:center;">No events defined.</div>';
+                return;
+            }
+            
+            events.forEach(evt => {
+                const div = document.createElement('div');
+                div.style.padding = '8px';
+                div.style.borderBottom = '1px solid var(--border)';
+                div.style.display = 'flex';
+                div.style.justifyContent = 'space-between';
+                div.style.alignItems = 'center';
+                
+                const info = document.createElement('div');
+                info.innerHTML = `<div style="font-weight:600; font-size:0.9rem;">${evt.name}</div>
+                                  <div style="font-size:0.75rem; color:var(--text-muted);">${evt.interval}s interval</div>`;
+                
+                const delBtn = document.createElement('button');
+                delBtn.innerText = '×';
+                delBtn.style.background = 'transparent';
+                delBtn.style.border = 'none';
+                delBtn.style.color = 'var(--text-muted)';
+                delBtn.style.fontSize = '1.2rem';
+                delBtn.style.cursor = 'pointer';
+                delBtn.onclick = () => deleteEvent(evt.id);
+                
+                div.appendChild(info);
+                div.appendChild(delBtn);
+                list.appendChild(div);
+            });
+        } catch (e) {
+            console.error("Failed to load events", e);
+        }
+    }
+    
+    function showEventModal() {
+        document.getElementById('eventModal').style.display = 'flex';
+    }
+    
+    function closeEventModal() {
+        document.getElementById('eventModal').style.display = 'none';
+    }
+    
+    async function saveEvent() {
+        const name = document.getElementById('evtName').value;
+        const condition = document.getElementById('evtCondition').value;
+        const action = document.getElementById('evtAction').value;
+        const interval = parseInt(document.getElementById('evtInterval').value);
+        
+        if (!name || !condition || !action) return alert("Please fill all fields");
+        
+        try {
+            await fetch('/api/events', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name, condition, action, interval})
+            });
+            closeEventModal();
+            loadEvents();
+        } catch (e) { alert("Error saving event: " + e); }
+    }
+    
+    async function deleteEvent(id) {
+        if (!confirm("Delete this event?")) return;
+        try {
+            await fetch('/api/events/' + id, { method: 'DELETE' });
+            loadEvents();
+        } catch (e) { alert("Error deleting: " + e); }
+    }
+    
+    async function startEvents() {
+        try {
+            await fetch('/api/events/start', { 
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    api_key: document.getElementById('apiKey').value
+                })
+            });
+            pollState();
+        } catch (e) { alert("Error starting: " + e); }
+    }
+    
+    async function stopEvents() {
+        try {
+            await fetch('/api/events/stop', { method: 'POST' });
+            pollState();
+        } catch (e) { alert("Error stopping: " + e); }
+    }
+    
+    function disableInputsForEvents(disabled) {
+        const allInputs = document.querySelectorAll('#instruction, #modelSelect, .toggle-pill input, #runBtn');
+        allInputs.forEach(el => el.disabled = disabled);
+        
+        // Also disable mode switching if running? The user said "until mode is stopped".
+        // Let's disable non-active mode radios
+        const radios = document.querySelectorAll('input[name="mode"]');
+        radios.forEach(r => {
+             if (!r.checked) r.disabled = disabled;
+        });
+    }
+
     async function askAgent() {
         const instruction = document.getElementById('instruction').value;
         if (!instruction.trim()) return;
@@ -770,9 +954,11 @@
         const runBtn = document.getElementById('runBtn');
         const stopBtn = document.getElementById('stopBtn');
         
-        if (mode === 'manual') {
-            runBtn.style.display = 'flex';
-            stopBtn.style.display = 'none';
+        if (mode === 'manual' || mode === 'events') {
+             // In events mode, we handle run buttons separately for events monitor.
+             // But if an AGENT ACTION is running (e.g. event triggered), we should show stop?
+             // No, the event actions are short lived.
+             // We'll trust disableInputsForEvents to handle it.
             return;
         }
 
@@ -813,7 +999,6 @@
 
     async function stopAgent() {
         await fetch('/api/stop', { method: 'POST' });
-        // State polling will eventually set running=false
     }
 
     function renderActions(actions) {
@@ -850,14 +1035,42 @@
             
             document.getElementById('statusIndicator').innerText = "Status: " + data.status;
             
-            const logs = document.getElementById('logs');
-            logs.innerText = data.logs.join('\n');
-            logs.scrollTop = logs.scrollHeight;
+            if (mode === 'events') {
+                const logs = document.getElementById('eventLogs');
+                // Only scroll if near bottom? For now always scroll.
+                logs.innerText = data.logs.join('\n'); 
+                logs.scrollTop = logs.scrollHeight;
+            } else {
+                const logs = document.getElementById('logs');
+                logs.innerText = data.logs.join('\n');
+                logs.scrollTop = logs.scrollHeight;
+            }
             
             renderActions(data.planned_actions);
             updateRunState(data.running);
             
-            if (data.running) {
+             // Event State handling
+            const evtStatus = document.getElementById('eventsStatus');
+            const btnStart = document.getElementById('btnStartEvents');
+            const btnStop = document.getElementById('btnStopEvents');
+            
+            if (data.events_running) {
+                evtStatus.innerText = "Running";
+                evtStatus.style.color = "var(--success)";
+                btnStart.style.display = 'none';
+                btnStop.style.display = 'block'; // block or flex
+                
+                disableInputsForEvents(true);
+            } else {
+                evtStatus.innerText = "Stopped";
+                evtStatus.style.color = "var(--text-muted)";
+                btnStart.style.display = 'block';
+                btnStop.style.display = 'none';
+                
+                if (mode === 'events') disableInputsForEvents(false); 
+            }
+            
+            if (data.running || data.events_running) {
                 setTimeout(pollState, 1000);
             }
         } catch (e) {

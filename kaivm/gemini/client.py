@@ -157,3 +157,56 @@ class GeminiPlanner:
         )
         return resp.text or ""
 
+    def check_condition(
+        self,
+        condition: str,
+        jpeg_bytes: bytes,
+    ) -> Dict[str, Any]:
+        """
+        Checks if a condition is met on the screen.
+        Returns {"met": bool, "reasoning": str}
+        """
+        jpeg_bytes_processed, _, _ = process_image(jpeg_bytes, max_dim=2048)
+        
+        prompt = f"""
+        Analyze the screenshot and determine if the following condition is met:
+        
+        CONDITION: {condition}
+        
+        Respond with a JSON object containing:
+        - "met": boolean (true if condition is met, false otherwise)
+        - "reasoning": string (explanation of your decision)
+        """
+        
+        parts = [
+            types.Part.from_bytes(data=jpeg_bytes_processed, mime_type="image/jpeg"),
+            prompt
+        ]
+        
+        schema = {
+            "type": "OBJECT",
+            "properties": {
+                "met": {"type": "BOOLEAN"},
+                "reasoning": {"type": "STRING"},
+            },
+            "required": ["met", "reasoning"]
+        }
+        
+        cfg = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=schema,
+        )
+        
+        client = self._client()
+        
+        try:
+            resp = client.models.generate_content(
+                model=self.model,
+                contents=parts,
+                config=cfg,
+            )
+            return json.loads(resp.text)
+        except Exception as e:
+            log.error(f"Condition check failed: {e}")
+            return {"met": False, "reasoning": f"Error: {e}"}
+
