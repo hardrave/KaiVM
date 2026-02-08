@@ -3,15 +3,18 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import hashlib
+import secrets
 from datetime import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
 import uuid
 from typing import Optional, List, Dict, Any, Set
 
-from fastapi import FastAPI, WebSocket, Request, BackgroundTasks, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
+from fastapi import FastAPI, WebSocket, Request, BackgroundTasks, WebSocketDisconnect, Response, Form
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel, field_validator
 
 from kaivm.agent.runner import AgentConfig, KaiVMAgent
@@ -19,9 +22,144 @@ from kaivm.gemini.client import GeminiPlanner, DEFAULT_MODEL
 from kaivm.hid.keyboard import KeyboardHID, ASCII_MAP, KEYCODES, MOD_NAMES, MOD_LCTRL, MOD_LSHIFT, MOD_LALT, MOD_LGUI
 from kaivm.hid.mouse import MouseHID, AbsoluteMouseHID
 from kaivm.util.log import get_logger, setup_logging
-from kaivm.util.paths import LATEST_JPG, STOP_FILE, CALIBRATION_FILE
+from kaivm.util.paths import LATEST_JPG, STOP_FILE, CALIBRATION_FILE, CONFIG_DIR
 
 log = get_logger("kaivm.server")
+
+# --- Authentication ---
+AUTH_FILE = CONFIG_DIR / "auth.secret"
+SESSIONS: Set[str] = set()
+
+def hash_password(password: str, salt: bytes = None) -> bytes:
+    if salt is None:
+        salt = secrets.token_bytes(16)
+    # 100,000 iterations of SHA256
+    pwd_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
+    return salt + pwd_hash
+
+def verify_password(stored_data: bytes, provided_password: str) -> bool:
+    try:
+        salt = stored_data[:16]
+        stored_hash = stored_data[16:]
+        new_hash = hashlib.pbkdf2_hmac('sha256', provided_password.encode(), salt, 100000)
+        return secrets.compare_digest(stored_hash, new_hash)
+    except Exception:
+        return False
+
+def create_session(response: Response):
+    token = secrets.token_urlsafe(32)
+    SESSIONS.add(token)
+    # Session lasts until browser close (no max-age) or server restart
+    response.set_cookie(key="session_token", value=token, httponly=True, samesite="lax")
+
+def is_authenticated(request: Request) -> bool:
+    token = request.cookies.get("session_token")
+    return token in SESSIONS
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        
+        # 1. Allow static resources and auth endpoints
+        if path.startswith("/static") or path in ["/login", "/setup", "/api/auth/login", "/api/auth/setup", "/favicon.ico"]:
+            return await call_next(request)
+
+        # 2. Check if password exists (First Run)
+        if not AUTH_FILE.exists():
+            if path.startswith("/api"):
+                 # API calls during setup phase? 
+                 # Maybe allow if checking status, but generally redirect to setup
+                 return JSONResponse({"error": "Setup required"}, status_code=401)
+            return RedirectResponse(url="/setup")
+
+        # 3. Check Authentication
+        if not is_authenticated(request):
+            # If it's an API call, return 401, otherwise redirect to login page
+            if path.startswith("/api"):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            return RedirectResponse(url="/login")
+
+        return await call_next(request)
+
+LOGIN_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>KaiVM Login</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        :root {
+            --bg-dark: #0f0f0f;
+            --bg-card: #1a1a1a;
+            --bg-input: #2a2a2a;
+            --bg-hover: #333;
+            --accent: #3b82f6;
+            --text: #e5e7eb;
+            --text-muted: #9ca3af;
+            --border: #333;
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display:flex; justify-content:center; align-items:center; height:100vh; background:var(--bg-dark); color:var(--text); margin:0; }
+        .card { background:var(--bg-card); padding:2rem; border-radius:12px; border: 1px solid var(--border); box-shadow:0 4px 20px rgba(0,0,0,0.3); width: 100%; max-width: 320px; display: flex; flex-direction: column; align-items: center; }
+        input { padding:12px; width:100%; margin-bottom:16px; background: var(--bg-input); color: var(--text); border:1px solid var(--border); border-radius:8px; box-sizing: border-box; font-size: 16px; outline: none; }
+        input:focus { border-color: var(--accent); }
+        input.error { border-color: #ef4444; }
+        button { padding:12px; width:100%; cursor:pointer; background:var(--text); color:var(--bg-dark); border:none; border-radius:8px; font-size: 16px; font-weight: 600; transition: background 0.2s; }
+        button:hover { background:white; }
+        .error { color: #ef4444; text-align: center; margin-bottom: 16px; font-size: 14px; }
+        .logo { height: 50px; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <img src="/static/kaivm-small.png" alt="KaiVM" class="logo">
+        <form action="/api/auth/login" method="post" style="width: 100%;">
+            <input type="password" name="password" placeholder="Password" required autofocus>
+            <button type="submit">Log In</button>
+        </form>
+    </div>
+</body>
+</html>
+"""
+
+SETUP_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>KaiVM Setup</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        :root {
+            --bg-dark: #0f0f0f;
+            --bg-card: #1a1a1a;
+            --bg-input: #2a2a2a;
+            --bg-hover: #333;
+            --accent: #3b82f6;
+            --text: #e5e7eb;
+            --text-muted: #9ca3af;
+            --border: #333;
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display:flex; justify-content:center; align-items:center; height:100vh; background:var(--bg-dark); color:var(--text); margin:0; }
+        .card { background:var(--bg-card); padding:2rem; border-radius:12px; border: 1px solid var(--border); box-shadow:0 4px 20px rgba(0,0,0,0.3); width: 100%; max-width: 320px; display: flex; flex-direction: column; align-items: center; }
+        p { color: var(--text-muted); text-align: center; margin-bottom: 24px; font-size: 14px; }
+        input { padding:12px; width:100%; margin-bottom:16px; background: var(--bg-input); color: var(--text); border:1px solid var(--border); border-radius:8px; box-sizing: border-box; font-size: 16px; outline: none; }
+        input:focus { border-color: var(--accent); }
+        button { padding:12px; width:100%; cursor:pointer; background:var(--text); color:var(--bg-dark); border:none; border-radius:8px; font-size: 16px; font-weight: 600; transition: background 0.2s; }
+        button:hover { background:white; }
+        .logo { height: 50px; margin-bottom: 12px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <img src="/static/kaivm-small.png" alt="KaiVM" class="logo">
+        <p>Create a password to secure your device.</p>
+        <form action="/api/auth/setup" method="post" style="width: 100%;">
+            <input type="password" name="password" placeholder="Create Password" required autofocus>
+            <button type="submit">Set Password</button>
+        </form>
+    </div>
+</body>
+</html>
+"""
 
 class Event(BaseModel):
     id: str
@@ -434,6 +572,7 @@ async def lifespan(app: FastAPI):
     log.info("Server shutting down...")
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(AuthMiddleware)
 
 # Static files
 STATIC_DIR = Path(__file__).parent / "static"
@@ -945,6 +1084,54 @@ async def get_state():
 @app.get("/")
 async def index():
     return HTMLResponse((STATIC_DIR / "index.html").read_text())
+
+# --- Auth Routes ---
+
+@app.get("/login")
+async def login_page():
+    if AUTH_FILE.exists():
+        return HTMLResponse(LOGIN_HTML)
+    return RedirectResponse("/setup")
+
+@app.get("/setup")
+async def setup_page():
+    if AUTH_FILE.exists():
+        return RedirectResponse("/login")
+    return HTMLResponse(SETUP_HTML)
+
+@app.post("/api/auth/setup")
+async def perform_setup(password: str = Form(...)):
+    if AUTH_FILE.exists():
+        return JSONResponse({"error": "Already setup"}, status_code=400)
+    
+    # Ensure config dir exists
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Save hashed password
+    data = hash_password(password)
+    AUTH_FILE.write_bytes(data)
+    
+    # Log user in immediately
+    resp = RedirectResponse(url="/", status_code=303)
+    create_session(resp)
+    return resp
+
+@app.post("/api/auth/login")
+async def perform_login(password: str = Form(...)):
+    if not AUTH_FILE.exists():
+        return RedirectResponse("/setup", status_code=303)
+        
+    try:
+        stored = AUTH_FILE.read_bytes()
+        if verify_password(stored, password):
+            resp = RedirectResponse(url="/", status_code=303)
+            create_session(resp)
+            return resp
+    except Exception:
+        pass
+        
+    # On failure, return HTML with error
+    return HTMLResponse(LOGIN_HTML.replace('placeholder="Password"', 'placeholder="Incorrect Password" class="error"').replace("</form>", "<div class='error'>Incorrect password</div></form>"))
 
 def main():
     import uvicorn
