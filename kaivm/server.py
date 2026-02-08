@@ -23,6 +23,7 @@ from kaivm.hid.keyboard import KeyboardHID, ASCII_MAP, KEYCODES, MOD_NAMES, MOD_
 from kaivm.hid.mouse import MouseHID, AbsoluteMouseHID
 from kaivm.util.log import get_logger, setup_logging
 from kaivm.util.paths import LATEST_JPG, STOP_FILE, CALIBRATION_FILE, CONFIG_DIR
+from kaivm.display import DisplayManager
 
 log = get_logger("kaivm.server")
 
@@ -551,6 +552,7 @@ class AppState:
     mouse_calibration: Optional[str] = None
     events: EventsManager = EventsManager()
     scheduler: SchedulerManager = SchedulerManager()
+    display: DisplayManager = DisplayManager()
 
 state = AppState()
 
@@ -565,8 +567,15 @@ async def lifespan(app: FastAPI):
             log.info(f"Loaded calibration: {state.mouse_calibration}")
         except Exception as e:
             log.error(f"Failed to load calibration: {e}")
+
+    # Start Display
+    state.display.start(state)
             
     yield
+    
+    # Stop Display
+    state.display.stop()
+    
     await state.events.stop_loop()
     await state.scheduler.stop_loop()
     log.info("Server shutting down...")
