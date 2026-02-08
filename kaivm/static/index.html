@@ -450,6 +450,7 @@
                 <label><input type="radio" name="mode" value="agent" checked onchange="setMode('agent')"> Agent</label>
                 <label><input type="radio" name="mode" value="manual" onchange="setMode('manual')"> Manual</label>
                 <label><input type="radio" name="mode" value="events" onchange="setMode('events')"> Events</label>
+                <label><input type="radio" name="mode" value="scheduler" onchange="setMode('scheduler')"> Scheduler</label>
             </div>
             <div id="statusIndicator">Status: Idle</div>
         </div>
@@ -522,6 +523,74 @@
                 <div style="display:flex; gap:8px;">
                     <button onclick="saveEvent()" class="btn-secondary" style="background:var(--accent); color:white; border:none;">Save</button>
                     <button onclick="closeEventModal()" class="btn-secondary">Cancel</button>
+                </div>
+             </div>
+        </div>
+
+        <!-- Scheduler Panel -->
+        <div class="card" id="schedulerPanel" style="display:none; flex: 1; border-color: var(--accent); overflow: hidden;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h3>Scheduler</h3>
+                <div id="schedulerStatus" style="font-size:0.8rem; color:var(--text-muted);">Stopped</div>
+            </div>
+
+            <div style="display:flex; gap:8px; margin-bottom:16px;">
+                 <button onclick="startScheduler()" class="btn-secondary" id="btnStartScheduler" style="color:var(--success); border-color:var(--success);">Start Scheduler</button>
+                 <button onclick="stopScheduler()" class="btn-secondary" id="btnStopScheduler" style="color:var(--danger); border-color:var(--danger); display:none;">Stop Scheduler</button>
+            </div>
+
+            <h4 style="margin: 0 0 8px 0;">Scheduled Actions</h4>
+            <div style="flex:1; overflow-y:auto; margin-bottom:16px; border:1px solid var(--border); border-radius:8px; padding:8px; min-height: 100px;" id="schedulesList">
+                <!-- Schedule items -->
+            </div>
+
+            <button onclick="showScheduleModal()" class="btn-secondary" style="margin-bottom:16px;">+ Add Schedule</button>
+
+            <h4 style="margin:0 0 8px 0;">Scheduler Logs</h4>
+            <div class="status-box" id="schedulerLogs" style="flex:1; min-height: 100px;"></div>
+        </div>
+
+        <!-- Schedule Modal -->
+        <div id="scheduleModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.8); z-index:100; align-items:center; justify-content:center;">
+             <div class="card" style="width:400px; max-width:90%;">
+                <h3 style="font-size: 1.1rem; color: var(--text);">New Schedule</h3>
+                <div class="form-col">
+                    <label>Name</label>
+                    <input type="text" id="schName" class="form-input" placeholder="e.g. Daily Cleanup">
+                </div>
+                <div class="form-col">
+                    <label>Action (Instruction)</label>
+                    <textarea id="schAction" class="form-input" rows="3" placeholder="e.g. Open terminal and run update"></textarea>
+                </div>
+                <div class="form-col">
+                    <label>Recurrence</label>
+                    <select id="schRecurrence" class="form-input" onchange="updateScheduleForm()">
+                        <option value="once">One Time</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="interval">Interval</option>
+                    </select>
+                </div>
+                <div class="form-col" id="divSchTime">
+                    <label>Time</label>
+                    <input type="datetime-local" id="schTimeOneTime" class="form-input">
+                    <input type="time" id="schTimeDaily" class="form-input" style="display:none;">
+                </div>
+                <div class="form-col" id="divSchInterval" style="display:none;">
+                    <label>Interval (Minutes)</label>
+                    <input type="number" id="schIntervalMinutes" class="form-input" min="1" value="60">
+                </div>
+                <div class="form-col">
+                    <label>Model</label>
+                    <select id="schModel" class="form-input">
+                        <option value="gemini-3-flash-preview" selected>Gemini 3 Flash</option>
+                        <option value="gemini-3-pro-preview">Gemini 3 Pro</option>
+                        <option value="gemini-2.0-flash-thinking-exp-01-21">Gemini 2.0 Flash Thinking</option>
+                    </select>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button onclick="saveSchedule()" class="btn-secondary" style="background:var(--accent); color:white; border:none;">Save</button>
+                    <button onclick="closeScheduleModal()" class="btn-secondary">Cancel</button>
                 </div>
              </div>
         </div>
@@ -645,12 +714,14 @@
         mode = m;
         const stream = document.getElementById('stream');
         const eventsPanel = document.getElementById('eventsPanel');
+        const schedulerPanel = document.getElementById('schedulerPanel');
         const mainPanel = document.getElementById('rightPanelContent');
         const calibPanel = document.getElementById('calibrationPanel');
         const settingsPanel = document.getElementById('settingsPanel');
         
         // Hide all right panels first
         eventsPanel.style.display = 'none';
+        schedulerPanel.style.display = 'none';
         mainPanel.style.display = 'none';
         calibPanel.style.display = 'none';
         settingsPanel.style.display = 'none';
@@ -704,6 +775,19 @@
              if (document.exitPointerLock) document.exitPointerLock();
              stream.onclick = function() { this.src = '/stream?' + new Date().getTime(); };
              loadEvents();
+        } else if (mode === 'scheduler') {
+             schedulerPanel.style.display = 'flex';
+             document.getElementById('statusIndicator').innerText = "Status: Scheduler Mode";
+             document.getElementById('statusIndicator').style.borderLeftColor = '#8b5cf6';
+             
+             document.getElementById('instruction').disabled = true;
+             document.getElementById('runBtn').disabled = true;
+             document.getElementById('modelSelect').disabled = true;
+             document.querySelectorAll('.toggle-pill input').forEach(el => el.disabled = true);
+             
+             if (document.exitPointerLock) document.exitPointerLock();
+             stream.onclick = function() { this.src = '/stream?' + new Date().getTime(); };
+             loadSchedules();
         } else {
             // Agent mode
             mainPanel.style.display = 'flex';
@@ -868,6 +952,205 @@
             pollState();
         } catch (e) { alert("Error stopping: " + e); }
     }
+
+    // SCHEDULER LOGIC
+    function updateScheduleForm() {
+        const type = document.getElementById('schRecurrence').value;
+        const divTime = document.getElementById('divSchTime');
+        const divInterval = document.getElementById('divSchInterval');
+        const oneTime = document.getElementById('schTimeOneTime');
+        const daily = document.getElementById('schTimeDaily');
+
+        if (type === 'interval') {
+            divTime.style.display = 'none';
+            divInterval.style.display = 'block';
+        } else {
+            divTime.style.display = 'block';
+            divInterval.style.display = 'none';
+            
+            if (type === 'daily') {
+                oneTime.style.display = 'none';
+                daily.style.display = 'block';
+            } else {
+                // Once or Weekly (Weekly needs full date to pick day of week)
+                oneTime.style.display = 'block';
+                daily.style.display = 'none';
+            }
+        }
+    }
+
+    async function loadSchedules() {
+        try {
+            const localStr = localStorage.getItem('kaivm_schedules');
+            let items = localStr ? JSON.parse(localStr) : [];
+            
+            if (items.length > 0) {
+                 await fetch('/api/schedules/sync', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({schedules: items})
+                });
+            } else {
+                const res = await fetch('/api/schedules');
+                const serverItems = await res.json();
+                if (serverItems.length > 0) {
+                    items = serverItems;
+                    localStorage.setItem('kaivm_schedules', JSON.stringify(items));
+                }
+            }
+            renderSchedulesList(items);
+        } catch (e) { console.error("Failed to load schedules", e); }
+    }
+
+    function renderSchedulesList(items) {
+        const list = document.getElementById('schedulesList');
+        list.innerHTML = '';
+        
+        if (items.length === 0) {
+            list.innerHTML = '<div style="color:var(--text-muted); font-size:0.85rem; padding:8px; text-align:center;">No schedules defined.</div>';
+            return;
+        }
+        
+        items.sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+        
+        items.forEach(sch => {
+            const div = document.createElement('div');
+            div.style.padding = '8px';
+            div.style.borderBottom = '1px solid var(--border)';
+            div.style.display = 'flex';
+            div.style.justifyContent = 'space-between';
+            div.style.alignItems = 'center';
+            div.style.opacity = sch.enabled ? '1' : '0.5';
+            
+            let timeDisplay = sch.time;
+            if (sch.recurrence === 'interval') {
+                timeDisplay = `Every ${sch.interval_minutes} mins`;
+            } else if (sch.recurrence === 'daily') {
+                timeDisplay = "Daily " + sch.time;
+            } else if (sch.recurrence === 'weekly') {
+                // Try to parse day name
+                try {
+                    const d = new Date(sch.time);
+                    const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
+                    const t = d.toLocaleTimeString('en-US', { hour: '2-digit', minute:'2-digit', hour12: false });
+                    timeDisplay = `Weekly ${dayName} ${t}`;
+                } catch(e) { timeDisplay = "Weekly " + sch.time; }
+            } else {
+                timeDisplay = sch.time.replace("T", " ");
+            }
+
+            const info = document.createElement('div');
+            info.innerHTML = `<div style="font-weight:600; font-size:0.9rem;">${sch.name}</div>
+                              <div style="font-size:0.75rem; color:var(--text-muted);">${timeDisplay} • ${sch.model || 'Default'}</div>`;
+            
+            const delBtn = document.createElement('button');
+            delBtn.innerText = '×';
+            delBtn.style.background = 'transparent';
+            delBtn.style.border = 'none';
+            delBtn.style.color = 'var(--text-muted)';
+            delBtn.style.fontSize = '1.2rem';
+            delBtn.style.cursor = 'pointer';
+            delBtn.onclick = () => deleteSchedule(sch.id);
+            
+            div.appendChild(info);
+            div.appendChild(delBtn);
+            list.appendChild(div);
+        });
+    }
+
+    function showScheduleModal() {
+        document.getElementById('scheduleModal').style.display = 'flex';
+        // Set default time to now
+        const now = new Date();
+        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+        document.getElementById('schTimeOneTime').value = now.toISOString().slice(0,16);
+        document.getElementById('schTimeDaily').value = now.toISOString().slice(11,16);
+        document.getElementById('schRecurrence').value = 'once';
+        updateScheduleForm();
+    }
+
+    function closeScheduleModal() {
+        document.getElementById('scheduleModal').style.display = 'none';
+    }
+
+    async function saveSchedule() {
+        const name = document.getElementById('schName').value;
+        const action = document.getElementById('schAction').value;
+        const model = document.getElementById('schModel').value;
+        const recurrence = document.getElementById('schRecurrence').value;
+        const interval = parseInt(document.getElementById('schIntervalMinutes').value);
+        
+        let time = "";
+        if (recurrence === 'interval') {
+            time = ""; // Not relevant
+        } else if (recurrence === 'daily') {
+            time = document.getElementById('schTimeDaily').value;
+        } else {
+            time = document.getElementById('schTimeOneTime').value;
+        }
+        
+        if (!name || !action) return alert("Please fill all fields");
+        if (recurrence !== 'interval' && !time) return alert("Please set a time");
+        
+        try {
+            const res = await fetch('/api/schedules', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    name, time, action, model, 
+                    recurrence, 
+                    interval_minutes: recurrence === 'interval' ? interval : null
+                })
+            });
+            const newSch = await res.json();
+            
+            const localStr = localStorage.getItem('kaivm_schedules');
+            const items = localStr ? JSON.parse(localStr) : [];
+            items.push(newSch);
+            localStorage.setItem('kaivm_schedules', JSON.stringify(items));
+            
+            closeScheduleModal();
+            loadSchedules();
+        } catch (e) { alert("Error saving schedule: " + e); }
+    }
+
+    async function deleteSchedule(id) {
+        if (!confirm("Delete this schedule?")) return;
+        try {
+            await fetch('/api/schedules/' + id, { method: 'DELETE' });
+            
+            const localStr = localStorage.getItem('kaivm_schedules');
+            if (localStr) {
+                let items = JSON.parse(localStr);
+                items = items.filter(e => e.id !== id);
+                localStorage.setItem('kaivm_schedules', JSON.stringify(items));
+            }
+            loadSchedules();
+        } catch (e) { alert("Error deleting: " + e); }
+    }
+
+    async function startScheduler() {
+        try {
+            await fetch('/api/schedules/start', { 
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    api_key: document.getElementById('apiKey').value,
+                    max_steps: parseInt(document.getElementById('maxSteps').value) || 10,
+                    timeout: (parseInt(document.getElementById('timeout').value) || 120) * 60
+                })
+            });
+            pollState();
+        } catch (e) { alert("Error starting: " + e); }
+    }
+
+    async function stopScheduler() {
+        try {
+            await fetch('/api/schedules/stop', { method: 'POST' });
+            pollState();
+        } catch (e) { alert("Error stopping: " + e); }
+    }
+
     
     function disableInputsForEvents(disabled) {
         const allInputs = document.querySelectorAll('#instruction, #modelSelect, .toggle-pill input, #runBtn');
@@ -1103,7 +1386,10 @@
             
             if (mode === 'events') {
                 const logs = document.getElementById('eventLogs');
-                // Only scroll if near bottom? For now always scroll.
+                logs.innerText = data.logs.join('\n'); 
+                logs.scrollTop = logs.scrollHeight;
+            } else if (mode === 'scheduler') {
+                const logs = document.getElementById('schedulerLogs');
                 logs.innerText = data.logs.join('\n'); 
                 logs.scrollTop = logs.scrollHeight;
             } else {
@@ -1117,26 +1403,45 @@
             
              // Event State handling
             const evtStatus = document.getElementById('eventsStatus');
-            const btnStart = document.getElementById('btnStartEvents');
-            const btnStop = document.getElementById('btnStopEvents');
+            const btnStartEvt = document.getElementById('btnStartEvents');
+            const btnStopEvt = document.getElementById('btnStopEvents');
             
             if (data.events_running) {
                 evtStatus.innerText = "Running";
                 evtStatus.style.color = "var(--success)";
-                btnStart.style.display = 'none';
-                btnStop.style.display = 'block'; // block or flex
-                
+                btnStartEvt.style.display = 'none';
+                btnStopEvt.style.display = 'block';
                 disableInputsForEvents(true);
             } else {
                 evtStatus.innerText = "Stopped";
                 evtStatus.style.color = "var(--text-muted)";
-                btnStart.style.display = 'block';
-                btnStop.style.display = 'none';
-                
-                if (mode === 'agent' || mode === 'manual') disableInputsForEvents(false); 
+                btnStartEvt.style.display = 'block';
+                btnStopEvt.style.display = 'none';
             }
             
-            if (data.running || data.events_running) {
+            // Scheduler State handling
+            const schStatus = document.getElementById('schedulerStatus');
+            const btnStartSch = document.getElementById('btnStartScheduler');
+            const btnStopSch = document.getElementById('btnStopScheduler');
+            
+            if (data.scheduler_running) {
+                schStatus.innerText = "Running";
+                schStatus.style.color = "var(--success)";
+                btnStartSch.style.display = 'none';
+                btnStopSch.style.display = 'block';
+                disableInputsForEvents(true);
+            } else {
+                schStatus.innerText = "Stopped";
+                schStatus.style.color = "var(--text-muted)";
+                btnStartSch.style.display = 'block';
+                btnStopSch.style.display = 'none';
+            }
+            
+            if (!data.events_running && !data.scheduler_running) {
+                 disableInputsForEvents(false);
+            }
+
+            if (data.running || data.events_running || data.scheduler_running) {
                 setTimeout(pollState, 1000);
             }
         } catch (e) {

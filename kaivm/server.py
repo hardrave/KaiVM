@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
 import uuid
@@ -56,6 +57,204 @@ class StartEventsRequest(BaseModel):
 
 class SyncEventsRequest(BaseModel):
     events: List[Event]
+
+class Schedule(BaseModel):
+    id: str
+    name: str
+    time: str
+    action: str
+    model: str = DEFAULT_MODEL
+    recurrence: str = "once"  # once, daily, weekly, interval
+    interval_minutes: Optional[int] = None
+    enabled: bool = True
+    last_run: Optional[str] = None
+
+class ScheduleCreate(BaseModel):
+    name: str
+    time: str
+    action: str
+    model: str = DEFAULT_MODEL
+    recurrence: str = "once"
+    interval_minutes: Optional[int] = None
+
+class StartSchedulerRequest(BaseModel):
+    api_key: Optional[str] = None
+    max_steps: int = 10
+    timeout: int = 120
+
+class SyncSchedulesRequest(BaseModel):
+    schedules: List[Schedule]
+
+class SchedulerManager:
+    def __init__(self):
+        self.schedules: Dict[str, Schedule] = {}
+        self.running: bool = False
+        self.task: Optional[asyncio.Task] = None
+        self.logs: List[str] = []
+        self.api_key: Optional[str] = None
+        self.max_steps: int = 10
+        self.timeout: int = 120
+
+    def add_schedule(self, sch: ScheduleCreate) -> Schedule:
+        new_sch = Schedule(
+            id=str(uuid.uuid4()),
+            name=sch.name,
+            time=sch.time,
+            action=sch.action,
+            model=sch.model,
+            recurrence=sch.recurrence,
+            interval_minutes=sch.interval_minutes,
+            enabled=True,
+            last_run=None
+        )
+        self.schedules[new_sch.id] = new_sch
+        self.log(f"Schedule added: {new_sch.name} ({new_sch.recurrence})")
+        return new_sch
+
+    def remove_schedule(self, schedule_id: str):
+        if schedule_id in self.schedules:
+            del self.schedules[schedule_id]
+            self.log(f"Schedule removed: {schedule_id}")
+
+    def sync_schedules(self, schedules: List[Schedule]):
+        self.schedules = {s.id: s for s in schedules}
+        self.log(f"Schedules synced: {len(schedules)} loaded.")
+
+    def log(self, msg: str):
+        ts = time.strftime("%H:%M:%S")
+        self.logs.append(f"[{ts}] {msg}")
+        if len(self.logs) > 100:
+            self.logs.pop(0)
+
+    async def start_loop(self, api_key: Optional[str] = None, max_steps: int = 10, timeout: int = 120):
+        if self.running: return
+        self.running = True
+        self.api_key = api_key
+        self.max_steps = max_steps
+        self.timeout = timeout
+        self.log(f"Scheduler started.")
+        self.task = asyncio.create_task(self._loop())
+
+    async def stop_loop(self):
+        self.running = False
+        if self.task:
+            self.task.cancel()
+            try:
+                await self.task
+            except asyncio.CancelledError:
+                pass
+        self.log("Scheduler stopped.")
+
+    async def _loop(self):
+        while self.running:
+            now = datetime.now()
+            current_time_str = now.strftime("%H:%M")
+            today_str = now.strftime("%Y-%m-%d")
+            
+            active_schedules = [s for s in self.schedules.values() if s.enabled]
+            
+            for sch in active_schedules:
+                if not self.running: break
+                
+                should_run = False
+                
+                try:
+                    if sch.recurrence == "interval":
+                        if sch.interval_minutes and sch.interval_minutes > 0:
+                            if not sch.last_run:
+                                should_run = True
+                            else:
+                                last_run_dt = datetime.fromisoformat(sch.last_run)
+                                delta_min = (now - last_run_dt).total_seconds() / 60
+                                if delta_min >= sch.interval_minutes:
+                                    should_run = True
+
+                    elif sch.recurrence == "daily":
+                        # sch.time expected as "HH:MM" for daily
+                        # If user provided full ISO, extract time?
+                        # Let's assume frontend sends "HH:MM" or we parse it.
+                        target_time_str = sch.time
+                        if "T" in target_time_str: # It's ISO
+                            target_time_str = target_time_str.split("T")[1][:5]
+                        
+                        if target_time_str == current_time_str:
+                             last_run_date = sch.last_run.split("T")[0] if sch.last_run else ""
+                             # Check if we already ran today
+                             if last_run_date != today_str:
+                                 should_run = True
+
+                    elif sch.recurrence == "weekly":
+                        # Expect sch.time to be ISO so we know the weekday
+                        if "T" in sch.time:
+                            target_dt = datetime.fromisoformat(sch.time)
+                            if now.weekday() == target_dt.weekday() and now.strftime("%H:%M") == target_dt.strftime("%H:%M"):
+                                # Check if ran today (which implies ran this week for this specific day)
+                                last_run_date = sch.last_run.split("T")[0] if sch.last_run else ""
+                                if last_run_date != today_str:
+                                    should_run = True
+
+                    else: # once
+                        if "T" in sch.time:
+                            target = datetime.fromisoformat(sch.time)
+                            # Strict execution: only execute if within 1 minute of target
+                            # If passed more than 1 minute, consider it missed/expired
+                            diff = (now - target).total_seconds()
+                            if 0 <= diff < 60:
+                                if not sch.last_run:
+                                    should_run = True
+                            elif diff >= 60:
+                                # Missed
+                                if not sch.last_run:
+                                    self.log(f"Schedule {sch.name} missed (Time was {sch.time}). Disabling.")
+                                    sch.enabled = False
+                        else:
+                             # Fallback for old HH:MM format if any
+                             if sch.time == current_time_str and not sch.last_run:
+                                 should_run = True
+
+                except Exception as e:
+                     self.log(f"Error checking schedule {sch.name}: {e}")
+
+                if should_run:
+                    self.log(f"Executing schedule: {sch.name}")
+                    sch.last_run = now.isoformat()
+                    await self._execute_action(sch.action, sch.model)
+                    
+                    if sch.recurrence == "once":
+                        sch.enabled = False
+                        self.log(f"One-time schedule {sch.name} completed and disabled.")
+
+            await asyncio.sleep(1)
+
+    async def _execute_action(self, instruction: str, model_name: str = DEFAULT_MODEL):
+        self.log(f"Action triggered: {instruction}")
+        try:
+            cal_x_s, cal_y_s, cal_x_o, cal_y_o = 1.0, 1.0, 0.0, 0.0
+            if state.mouse_calibration:
+                try:
+                    parts = [float(x.strip()) for x in state.mouse_calibration.split(",")]
+                    if len(parts) == 4:
+                        cal_x_s, cal_y_s, cal_x_o, cal_y_o = parts
+                except: pass
+
+            planner = GeminiPlanner(model=model_name, timeout_steps=2, api_key=self.api_key)
+            agent = KaiVMAgent(
+                planner=planner,
+                kbd=KeyboardHID(),
+                mouse=MouseHID(),
+                abs_mouse=AbsoluteMouseHID(),
+                cfg=AgentConfig(
+                    max_steps=self.max_steps,
+                    overall_timeout_s=self.timeout,
+                    allow_danger=True, 
+                    cal_x_scale=cal_x_s, cal_y_scale=cal_y_s, 
+                    cal_x_offset=cal_x_o, cal_y_offset=cal_y_o,
+                ),
+            )
+            res = await asyncio.to_thread(agent.run, instruction)
+            self.log(f"Action finished: {res}")
+        except Exception as e:
+            self.log(f"Action failed: {e}")
 
 class EventsManager:
     def __init__(self):
@@ -213,6 +412,7 @@ class AppState:
     planned_actions: List[Dict[str, Any]] = []
     mouse_calibration: Optional[str] = None
     events: EventsManager = EventsManager()
+    scheduler: SchedulerManager = SchedulerManager()
 
 state = AppState()
 
@@ -229,6 +429,8 @@ async def lifespan(app: FastAPI):
             log.error(f"Failed to load calibration: {e}")
             
     yield
+    await state.events.stop_loop()
+    await state.scheduler.stop_loop()
     log.info("Server shutting down...")
 
 app = FastAPI(lifespan=lifespan)
@@ -689,6 +891,36 @@ async def stop_events():
     await state.events.stop_loop()
     return {"status": "stopped"}
 
+@app.get("/api/schedules")
+async def list_schedules():
+    return list(state.scheduler.schedules.values())
+
+@app.post("/api/schedules")
+async def create_schedule(sch: ScheduleCreate):
+    return state.scheduler.add_schedule(sch)
+
+@app.delete("/api/schedules/{schedule_id}")
+async def delete_schedule(schedule_id: str):
+    state.scheduler.remove_schedule(schedule_id)
+    return {"status": "deleted"}
+
+@app.post("/api/schedules/sync")
+async def sync_schedules(req: SyncSchedulesRequest):
+    state.scheduler.sync_schedules(req.schedules)
+    return {"status": "synced", "count": len(req.schedules)}
+
+@app.post("/api/schedules/start")
+async def start_scheduler(req: StartSchedulerRequest):
+    if state.agent_running:
+         return JSONResponse({"error": "Agent is running. Stop it first."}, status_code=400)
+    await state.scheduler.start_loop(api_key=req.api_key, max_steps=req.max_steps, timeout=req.timeout)
+    return {"status": "started"}
+
+@app.post("/api/schedules/stop")
+async def stop_scheduler():
+    await state.scheduler.stop_loop()
+    return {"status": "stopped"}
+
 @app.get("/api/state")
 async def get_state():
     logs = state.logs
@@ -697,10 +929,13 @@ async def get_state():
     # The user asked for "Agent Reasoning" in events mode.
     if state.events.running:
         logs = state.events.logs
+    elif state.scheduler.running:
+        logs = state.scheduler.logs
 
     return {
         "running": state.agent_running,
         "events_running": state.events.running,
+        "scheduler_running": state.scheduler.running,
         "instruction": state.current_instruction,
         "status": state.last_status,
         "logs": logs[-50:], # Last 50 logs
