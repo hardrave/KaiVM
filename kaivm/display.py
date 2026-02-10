@@ -191,7 +191,7 @@ class DisplayManager:
         ip = get_ip_address()
         mdns = get_mdns_hostname()
         
-        mode = "Manual"
+        mode = "Agent"
         status = "Idle"
         services_ok = True
         
@@ -255,19 +255,19 @@ class DisplayManager:
         sys_val = "Online" if services_ok else "Error"
         sys_col = "green" if services_ok else "red"
         
-        draw.text((10, body_y), "System:", font=self.font_bold, fill="white")
-        draw.text((110, body_y), sys_val, font=self.font, fill=sys_col)
+        draw.text((10, body_y), "System:", font=self.font, fill="white")
+        draw.text((110, body_y), sys_val, font=self.font_bold, fill=sys_col)
         
         body_y += 30
 
         # Mode
-        draw.text((10, body_y), "Mode:", font=self.font_bold, fill="yellow")
-        draw.text((110, body_y), mode, font=self.font, fill="white")
+        draw.text((10, body_y), "Mode:", font=self.font, fill="white")
+        draw.text((110, body_y), mode, font=self.font_bold, fill="yellow")
         
         # Status (Same Line)
         body_y += 30
-        draw.text((10, body_y), "Status:", font=self.font_bold, fill="cyan")
-        draw.text((110, body_y), status, font=self.font, fill="white")
+        draw.text((10, body_y), "Status:", font=self.font, fill="white")
+        draw.text((110, body_y), status, font=self.font_bold, fill="cyan")
         
         # Footer (Bottom 60px)
         footer_y = height - 60
@@ -275,8 +275,8 @@ class DisplayManager:
         
         footer_y += 10
         # Increased font size for IP/mDNS
-        draw.text((10, footer_y), f"IP: {ip}", font=self.font, fill="lightgrey")
-        draw.text((10, footer_y + 20), f"mDNS: {mdns}", font=self.font, fill="lightgrey")
+        draw.text((10, footer_y), f"IP: {ip}", font=self.font_bold, fill="lightgrey")
+        draw.text((10, footer_y + 20), f"mDNS: {mdns}", font=self.font_bold, fill="lightgrey")
 
         # 3. Push to Display
         # Direct display (no software rotation)

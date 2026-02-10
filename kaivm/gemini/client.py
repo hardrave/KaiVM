@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+import httpx
 from google import genai
 from google.genai import types
+from google.genai.errors import ClientError, ServerError
 from io import BytesIO
 
 from kaivm.gemini.prompts import SYSTEM, USER_TEMPLATE
 from kaivm.gemini.schema import PLAN_SCHEMA
-from kaivm.util.image import get_image_size, process_image
+from kaivm.util.paths import LATEST_JPG, STOP_FILE, RUN_DIR
 from kaivm.util.log import get_logger
+from kaivm.util.image import get_image_size, process_image
 
 log = get_logger("kaivm.gemini")
 
@@ -28,7 +32,64 @@ class GeminiPlanner:
 
     def _client(self) -> genai.Client:
         key = self.api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-        return genai.Client(api_key=key) if key else genai.Client()
+        # Set a 60s timeout to prevent hanging indefinitely
+        http_options = {"timeout": 60000}
+        return genai.Client(api_key=key, http_options=http_options) if key else genai.Client(http_options=http_options)
+
+    def _generate_with_retry(
+        self,
+        client: genai.Client,
+        model: str,
+        contents: list[Any],
+        config: types.GenerateContentConfig,
+    ) -> Any:
+        backoff = 2.0
+        max_retries = 5
+        for i in range(max_retries):
+            if STOP_FILE.exists():
+                raise RuntimeError("Stopped by user during API call")
+
+            try:
+                return client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=config,
+                )
+            except (ClientError, ServerError, httpx.TimeoutException) as e:
+                if STOP_FILE.exists():
+                    raise RuntimeError("Stopped by user during API error handling")
+
+                # Check for 429 (Resource Exhausted) or 5xx (Server Error) or Timeout
+                is_retryable = False
+                err_str = str(e)
+
+                if isinstance(e, httpx.TimeoutException):
+                    is_retryable = True
+                elif isinstance(e, ServerError):
+                    is_retryable = True
+                elif isinstance(e, ClientError):
+                    # 429 is the standard code for quota limits
+                    if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                        is_retryable = True
+
+                if not is_retryable:
+                    raise
+
+                if i == max_retries - 1:
+                    log.error(f"Gemini API failed after {max_retries} retries: {e}")
+                    raise
+
+                log.warning(f"API Error (attempt {i+1}/{max_retries}): {e}. Retrying in {backoff}s...")
+                
+                # Sleep with check
+                sleep_end = time.time() + backoff
+                while time.time() < sleep_end:
+                    if STOP_FILE.exists():
+                        raise RuntimeError("Stopped by user during API retry sleep")
+                    time.sleep(0.1)
+                
+                backoff *= 2.0
+        return None  # Should not be reached
 
     def plan(
         self,
@@ -116,7 +177,8 @@ class GeminiPlanner:
                     f"Previous output:\n{last_text}",
                 ]
 
-            resp = client.models.generate_content(
+            resp = self._generate_with_retry(
+                client=client,
                 model=self.model,
                 contents=prompt_parts,
                 config=cfg,

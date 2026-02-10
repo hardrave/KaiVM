@@ -841,6 +841,18 @@ async def calculate_calibration(req: CalculateCalibrationRequest):
 
     return {"result": res}
 
+class ListLogHandler(logging.Handler):
+    def __init__(self, log_list: List[str]):
+        super().__init__()
+        self.log_list = log_list
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            self.log_list.append(msg)
+        except Exception:
+            self.handleError(record)
+
 def _agent_runner_thread(req: RunRequest):
     if STOP_FILE.exists():
         try:
@@ -853,6 +865,13 @@ def _agent_runner_thread(req: RunRequest):
     state.logs.append(f"Starting agent: {req.instruction}")
     state.last_status = "Running"
     
+    # Capture logs to UI
+    log_handler = ListLogHandler(state.logs)
+    # Use a concise format for the UI
+    log_handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+    kaivm_logger = logging.getLogger("kaivm")
+    kaivm_logger.addHandler(log_handler)
+
     try:
         planner = GeminiPlanner(
             model=req.model,
@@ -878,7 +897,6 @@ def _agent_runner_thread(req: RunRequest):
                 parts = [float(x.strip()) for x in state.mouse_calibration.split(",")]
                 if len(parts) == 4:
                     cal_x_s, cal_y_s, cal_x_o, cal_y_o = parts
-                    state.logs.append(f"Using calibration: {state.mouse_calibration}")
             except Exception as e:
                 state.logs.append(f"Invalid calibration ignored: {e}")
 
@@ -934,6 +952,7 @@ def _agent_runner_thread(req: RunRequest):
         state.logs.append(f"Error: {e}")
         state.last_status = "Error"
     finally:
+        kaivm_logger.removeHandler(log_handler)
         state.agent_running = False
 
 @app.post("/api/run")
@@ -951,6 +970,7 @@ async def stop_agent():
     # Write stop file
     STOP_FILE.touch()
     state.logs.append("Stop requested...")
+    state.last_status = "Stopping..."
     return {"status": "stopping"}
 
 @app.post("/api/ask")

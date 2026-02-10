@@ -98,6 +98,8 @@ def _actions_brief(actions: List[Action]) -> str:
 def _wait_for_new_frame(path: Path, last_mtime: float, timeout_s: float, poll_s: float) -> bool:
     end = time.time() + timeout_s
     while time.time() < end:
+        if STOP_FILE.exists():
+            return False
         try:
             st = path.stat()
             if st.st_mtime > last_mtime:
@@ -326,65 +328,69 @@ class KaiVMAgent:
         if self.cfg.dry_run:
             return None
 
-        if a.type == "mouse_move":
-            if a.x is not None and a.y is not None and self.abs_mouse:
-                x_abs, y_abs = self._to_abs_hid(a.x, a.y)
-                
-                log.info(f"MoveAbs: ({a.x}, {a.y}) -> ({x_abs}, {y_abs}) [cal s={self.cfg.cal_x_scale:.2f},{self.cfg.cal_y_scale:.2f} o={self.cfg.cal_x_offset:.2f},{self.cfg.cal_y_offset:.2f}]")
-                
-                self.abs_mouse.move(x_abs, y_abs)
-                self._last_abs_x = x_abs
-                self._last_abs_y = y_abs
-                return None
-            
-            # Fallback to relative
-            self.mouse.move(a.dx or 0, a.dy or 0)
-            return None
-
-        if a.type == "mouse_click":
-            if self.abs_mouse:
-                if a.x is not None and a.y is not None:
+        try:
+            if a.type == "mouse_move":
+                if a.x is not None and a.y is not None and self.abs_mouse:
                     x_abs, y_abs = self._to_abs_hid(a.x, a.y)
                     
-                    log.info(f"ClickAbs: ({a.x}, {a.y}) -> ({x_abs}, {y_abs})")
-                    self.abs_mouse.click(x_abs, y_abs, a.button or "left")
+                    log.info(f"MoveAbs: ({a.x}, {a.y}) -> ({x_abs}, {y_abs}) [cal s={self.cfg.cal_x_scale:.2f},{self.cfg.cal_y_scale:.2f} o={self.cfg.cal_x_offset:.2f},{self.cfg.cal_y_offset:.2f}]")
+                    
+                    self.abs_mouse.move(x_abs, y_abs)
                     self._last_abs_x = x_abs
                     self._last_abs_y = y_abs
                     return None
+                
+                # Fallback to relative
+                self.mouse.move(a.dx or 0, a.dy or 0)
+                return None
 
-                if self._last_abs_x is not None and self._last_abs_y is not None:
-                    # Click at last known position
-                    self.abs_mouse.click(self._last_abs_x, self._last_abs_y, a.button or "left")
+            if a.type == "mouse_click":
+                if self.abs_mouse:
+                    if a.x is not None and a.y is not None:
+                        x_abs, y_abs = self._to_abs_hid(a.x, a.y)
+                        
+                        log.info(f"ClickAbs: ({a.x}, {a.y}) -> ({x_abs}, {y_abs})")
+                        self.abs_mouse.click(x_abs, y_abs, a.button or "left")
+                        self._last_abs_x = x_abs
+                        self._last_abs_y = y_abs
+                        return None
+
+                    if self._last_abs_x is not None and self._last_abs_y is not None:
+                        # Click at last known position
+                        self.abs_mouse.click(self._last_abs_x, self._last_abs_y, a.button or "left")
+                        return None
+                
+                self.mouse.click(a.button or "left")
+                return None
+
+            if a.type == "type_text":
+                assert a.text is not None
+                if not self.cfg.allow_danger and is_dangerous_text(a.text):
+                    return f"Refused dangerous type_text without --allow-danger: {a.text!r}"
+                self.kbd.send_text(a.text)
+                return None
+
+            if a.type == "key":
+                raw = (a.key or "").strip()
+                if not raw:
+                    return "Empty key action"
+
+                if self.kbd.send_hotkey(raw):
                     return None
-            
-            self.mouse.click(a.button or "left")
-            return None
 
-        if a.type == "type_text":
-            assert a.text is not None
-            if not self.cfg.allow_danger and is_dangerous_text(a.text):
-                return f"Refused dangerous type_text without --allow-danger: {a.text!r}"
-            self.kbd.send_text(a.text)
-            return None
+                up = raw.upper()
+                if up in KEY_ALIASES:
+                    self.kbd.send_text(KEY_ALIASES[up][0])
+                    return None
 
-        if a.type == "key":
-            raw = (a.key or "").strip()
-            if not raw:
-                return "Empty key action"
+                if len(raw) == 1:
+                    self.kbd.send_text(raw)
+                    return None
 
-            if self.kbd.send_hotkey(raw):
-                return None
+                return f"Unknown key alias/hotkey: {raw}"
 
-            up = raw.upper()
-            if up in KEY_ALIASES:
-                self.kbd.send_text(KEY_ALIASES[up][0])
-                return None
-
-            if len(raw) == 1:
-                self.kbd.send_text(raw)
-                return None
-
-            return f"Unknown key alias/hotkey: {raw}"
+        except (TimeoutError, BlockingIOError, OSError) as e:
+            return f"HID Device Error: {e}"
 
         if a.type == "done":
             return a.summary or "done"
@@ -508,11 +514,18 @@ class KaiVMAgent:
             screen_w, screen_h = get_image_size(jpeg)
 
             for a in actions:
+                if STOP_FILE.exists():
+                    return "Stopped by user"
+                    
                 res = self._execute(a, screen_w, screen_h)
                 if res is not None and a.type == "done":
                     return res
                 if res is not None:
-                    log.warning("Action result: %s", res)
+                    # Suppress the specific HID timeout warning if requested by user context
+                    if "HID Device Error" in res and "timeout" in res:
+                        pass  # Completely suppress log
+                    else:
+                        log.warning("Action result: %s", res)
 
             if any_input:
                 _wait_for_new_frame(

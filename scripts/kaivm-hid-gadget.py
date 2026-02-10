@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import os
 import time
 from pathlib import Path
@@ -40,24 +41,39 @@ def udc_name() -> str:
 
 def write(p: Path, data: str | bytes) -> None:
     # Wait for file to appear (ConfigFS race?)
-    deadline = time.time() + 2.0
+    deadline = time.time() + 5.0
     while not p.exists():
         if time.time() > deadline:
+            print(f"TIMEOUT waiting for {p}")
             break
         time.sleep(0.01)
 
-    if isinstance(data, str):
-        p.write_text(data)
-    else:
-        p.write_bytes(data)
+    for attempt in range(60):
+        try:
+            if isinstance(data, str):
+                p.write_text(data)
+            else:
+                p.write_bytes(data)
+            return
+        except OSError as e:
+            if e.errno == errno.EBUSY:
+                if attempt < 59:
+                    time.sleep(0.5)
+                    continue
+            print(f"ERROR writing to {p}: {e}", flush=True)
+            raise
 
 def unbind() -> None:
     udc = G / "UDC"
-    if udc.exists():
-        try:
-            udc.write_text("")
-        except Exception:
-            pass
+    if not udc.exists():
+        return
+    try:
+        # Check if bound before writing; writing \n handles unbind more reliably than empty string
+        if udc.read_text().strip():
+            write(udc, "\n")
+            time.sleep(0.1)
+    except Exception as e:
+        print(f"WARNING: unbind failed: {e}")
 
 def stop() -> None:
     if not G.exists():
@@ -85,10 +101,19 @@ def stop() -> None:
             pass
 
 def start() -> None:
+    # Ensure dependencies: load libcomposite and mount configfs if missing
+    if not GADGET_DIR.exists():
+        os.system("modprobe libcomposite")
+        config_site = Path("/sys/kernel/config")
+        if config_site.exists() and not config_site.is_mount():
+            os.system("mount -t configfs none /sys/kernel/config")
+        time.sleep(0.5)
+
     if not GADGET_DIR.exists():
         raise RuntimeError("configfs not mounted? /sys/kernel/config/usb_gadget missing")
 
     stop()
+    time.sleep(0.25)
     G.mkdir(parents=True, exist_ok=True)
 
     # IDs
@@ -145,6 +170,7 @@ def start() -> None:
 
     # Bind
     u = udc_name()
+    print(f"Binding to UDC: {u}", flush=True)
     write(G / "UDC", u)
 
 def main() -> int:

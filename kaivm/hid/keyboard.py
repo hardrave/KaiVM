@@ -80,6 +80,9 @@ KEYCODES: Dict[str, int] = {
     "END": 0x4D,
     "PAGEUP": 0x4B,
     "PAGEDOWN": 0x4E,
+    "DEL": 0x4C,
+    "INSERT": 0x49,
+    "INS": 0x49,
 }
 
 # Function keys F1..F12

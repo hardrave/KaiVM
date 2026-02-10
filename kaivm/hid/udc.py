@@ -41,10 +41,9 @@ def usb_replug(gadget_udc_path: Path = GADGET_UDC_PATH, settle: float = 1.0) -> 
     Soft re-enumerate: unbind/rebind without removing power.
 
     Requires root (writes to configfs). For PoC robustness:
-    - If not root, we skip with a warning (no crash).
+    - If not root, we skip silently (no crash).
     """
     if os.geteuid() != 0:
-        log.warning("usb_replug requires root; skipping (run `sudo -E kaivm ...` if you want it)")
         return
 
     u = udc_name()
